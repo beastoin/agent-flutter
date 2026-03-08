@@ -1,0 +1,12 @@
+{
+  "name": "agent-flutter",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "agent-flutter": "./bin/agent-flutter.mjs"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test:unit": "node --experimental-strip-types --test __tests__/*.test.ts"
+  }
+}
