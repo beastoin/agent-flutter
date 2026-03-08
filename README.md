@@ -134,7 +134,12 @@ Precedence: CLI flag > env var > built-in default.
 
 ## Development
 
+This repo is the **publish target**. Source of truth is [`beastoin/autoloop`](https://github.com/beastoin/autoloop) — all code changes go through autoloop's phase-gated build loop (program → implement → eval → keep/revert), then get copied here for npm publish.
+
+Do not edit this repo directly. To make changes, add a new phase program in autoloop.
+
 ```bash
+# For local testing only
 git clone https://github.com/beastoin/agent-flutter.git
 cd agent-flutter
 npm install
