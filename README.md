@@ -1,5 +1,7 @@
 # agent-flutter
 
+[![npm](https://img.shields.io/npm/v/agent-flutter-cli)](https://www.npmjs.com/package/agent-flutter-cli)
+
 CLI for AI agents to control Flutter apps via Dart VM Service + Marionette. Same `@ref` + snapshot workflow as `agent-device` and `agent-browser`.
 
 ## Prerequisites
@@ -41,6 +43,9 @@ void main() {
 ```bash
 # Install
 npm install -g agent-flutter-cli
+
+# Verify prerequisites
+agent-flutter doctor
 
 # Connect to running Flutter app (auto-detects VM Service URI from logcat)
 agent-flutter connect
