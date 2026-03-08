@@ -36,6 +36,7 @@ Commands:
   reload                   Hot reload the Flutter app
   logs                     Get Flutter app logs
   schema [cmd]             Show command schema (JSON)
+  doctor                   Check prerequisites and diagnose issues
   diff snapshot            Show changes since last snapshot
 
 Global flags:
@@ -245,6 +246,9 @@ async function main(): Promise<void> {
         break;
       case 'logs':
         await (await import('./commands/logs.ts')).logsCommand(cmdArgs);
+        break;
+      case 'doctor':
+        await (await import('./commands/doctor.ts')).doctorCommand(cmdArgs);
         break;
       case 'diff':
         if (cmdArgs[0] === 'snapshot') {

@@ -84,6 +84,7 @@ agent-flutter connect ws://127.0.0.1:38047/abc=/ws
 | `reload` | Trigger Flutter hot reload | `agent-flutter reload` |
 | `logs` | Get Flutter app logs | `agent-flutter logs` |
 | `schema [command]` | Output command schema (JSON) | `agent-flutter schema press` |
+| `doctor` | Check prerequisites and diagnose issues | `agent-flutter doctor` |
 
 ### Global flags
 

@@ -191,6 +191,14 @@ export const COMMAND_SCHEMAS: CommandSchema[] = [
     examples: ['agent-flutter logs'],
   },
   {
+    name: 'doctor',
+    description: 'Check prerequisites: ADB, device, Flutter app, Marionette, session',
+    args: [],
+    flags: [],
+    exitCodes: { '0': 'all checks pass', '2': 'one or more checks failed' },
+    examples: ['agent-flutter doctor', 'agent-flutter --json doctor'],
+  },
+  {
     name: 'schema',
     description: 'Show command schema for agent discovery',
     args: [{ name: 'command', required: false, description: 'Specific command to describe' }],
