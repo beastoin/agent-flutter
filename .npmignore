@@ -1,0 +1,8 @@
+# Development files
+src/
+__tests__/
+autoresearch/
+.github/
+tsconfig.json
+.gitignore
+*.tgz

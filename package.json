@@ -1,12 +1,51 @@
 {
-  "name": "agent-flutter",
-  "version": "0.1.0",
+  "name": "agent-flutter-cli",
+  "version": "1.0.0",
+  "description": "CLI for AI agents to control Flutter apps via Marionette (Dart VM Service)",
   "type": "module",
   "bin": {
     "agent-flutter": "./bin/agent-flutter.mjs"
   },
+  "files": [
+    "bin/",
+    "dist/",
+    "AGENTS.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "flutter",
+    "testing",
+    "automation",
+    "ai-agent",
+    "marionette",
+    "dart",
+    "vm-service",
+    "mobile",
+    "android",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/beastoin/agent-flutter.git"
+  },
+  "bugs": {
+    "url": "https://github.com/beastoin/agent-flutter/issues"
+  },
+  "homepage": "https://github.com/beastoin/agent-flutter#readme",
+  "license": "MIT",
+  "author": "beastoin",
   "scripts": {
+    "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --outfile=dist/cli.mjs --external:node:*",
     "typecheck": "tsc --noEmit",
-    "test:unit": "node --experimental-strip-types --test __tests__/*.test.ts"
+    "test:unit": "node --test __tests__/*.test.ts",
+    "prepublishOnly": "npm run typecheck && npm run test:unit && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.5",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.9.3"
   }
 }

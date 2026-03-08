@@ -1,3 +1,7 @@
+# Build output
+dist/
+node_modules/
+*.tgz
 
 # Autoresearch artifacts
 autoresearch/e2e-logs/
