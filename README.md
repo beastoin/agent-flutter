@@ -157,7 +157,7 @@ node dist/cli.mjs --help
 | Tool | Platform | Transport |
 |---|---|---|
 | `agent-flutter` | Flutter apps | Dart VM Service + Marionette |
-| `agent-device` | Native mobile (Android/iOS) | daemon + platform runners |
+| [`autoloop`](https://github.com/beastoin/autoloop) | Native mobile (Android/iOS) + autoloop build system | daemon + platform runners |
 | `agent-browser` | Web apps | browser automation |
 
 All three share the same `snapshot → @ref → press/fill/wait/is` workflow.
