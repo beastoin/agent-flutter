@@ -1,0 +1,9 @@
+
+# Autoresearch artifacts
+autoresearch/e2e-logs/
+autoresearch/e2e-run.log
+autoresearch/e2e-flutter-app/.dart_tool/
+autoresearch/e2e-flutter-app/build/
+autoresearch/e2e-flutter-app/.idea/
+autoresearch/e2e-flutter-app/local.properties
+autoresearch/e2e-flutter-app/*.iml
