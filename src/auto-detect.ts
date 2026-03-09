@@ -1,7 +1,9 @@
 /**
- * Auto-detect Flutter VM Service URI from adb logcat.
+ * Auto-detect Flutter VM Service URI.
+ * Priority: AGENT_FLUTTER_LOG (host-side) > logcat (device-side, less reliable).
  */
 import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 
 /**
@@ -20,9 +22,35 @@ function isPortOpen(port: number, timeoutMs = 1000): Promise<boolean> {
 }
 
 /**
+ * Read the host-side VM Service URI from flutter run's log file.
+ * Set AGENT_FLUTTER_LOG to the path where flutter run output is captured.
+ * The host URI has the correct port and auth token for host-side access.
+ *
+ * flutter run prints: "A Dart VM Service on <device> is available at: http://127.0.0.1:<port>/<token>/"
+ */
+function detectFromFlutterLog(): string | null {
+  const logPath = process.env.AGENT_FLUTTER_LOG;
+  if (!logPath) return null;
+  try {
+    const log = readFileSync(logPath, 'utf-8');
+    // Match the host-side URI from flutter run output
+    const matches = log.match(/is available at: (http:\/\/127\.0\.0\.1:\d+\/[^/]+\/)/g);
+    if (!matches || matches.length === 0) return null;
+    // Take last match (most recent)
+    const last = matches[matches.length - 1];
+    const uriMatch = last.match(/(http:\/\/127\.0\.0\.1:\d+\/[^/]+\/)/);
+    if (!uriMatch) return null;
+    return uriMatch[1].replace('http://', 'ws://') + 'ws';
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Parse adb logcat output for the Flutter VM Service URI.
  * Returns the WebSocket URI or null if not found.
- * Takes the last match (most recent) and validates the port is open.
+ * NOTE: logcat URIs are device-side and may not work from the host.
+ * Prefer AGENT_FLUTTER_LOG or explicit URI.
  */
 export function detectVmServiceUri(deviceId?: string): string | null {
   const device = deviceId ?? process.env.AGENT_FLUTTER_DEVICE ?? 'emulator-5554';
@@ -49,13 +77,23 @@ export function detectVmServiceUri(deviceId?: string): string | null {
 }
 
 /**
- * Async version that validates the port is actually open.
- * Falls back through matches from most recent to oldest.
+ * Async auto-detect with priority:
+ * 1. AGENT_FLUTTER_LOG — host-side URI from flutter run log (correct port + token)
+ * 2. logcat — device-side URI (needs port forwarding, may have wrong token)
  */
 export async function detectVmServiceUriAsync(deviceId?: string): Promise<string | null> {
+  // Priority 1: flutter run log file (host-side URI, always correct)
+  const fromLog = detectFromFlutterLog();
+  if (fromLog) {
+    const portMatch = fromLog.match(/:(\d+)\//);
+    if (portMatch && await isPortOpen(parseInt(portMatch[1], 10))) {
+      return fromLog;
+    }
+  }
+
+  // Priority 2: logcat (device-side, less reliable)
   const device = deviceId ?? process.env.AGENT_FLUTTER_DEVICE ?? 'emulator-5554';
   try {
-    // Set up port forwarding for all candidate ports first
     const logcat = execSync(`adb -s ${device} logcat -d -s flutter`, {
       encoding: 'utf-8',
       timeout: 10000,
