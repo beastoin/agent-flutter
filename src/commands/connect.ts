@@ -4,14 +4,14 @@
  */
 import { VmServiceClient } from '../vm-client.ts';
 import { saveSession, clearSession } from '../session.ts';
-import { detectVmServiceUri, setupPortForwarding } from '../auto-detect.ts';
+import { detectVmServiceUriAsync, setupPortForwarding } from '../auto-detect.ts';
 
 export async function connectCommand(args: string[]): Promise<void> {
   let uri = args[0] ?? process.env.AGENT_FLUTTER_URI;
 
   if (!uri) {
-    // Auto-detect from logcat
-    const detected = detectVmServiceUri();
+    // Auto-detect from logcat, validating port is open
+    const detected = await detectVmServiceUriAsync();
     if (!detected) {
       throw new Error(
         'Could not detect Flutter VM Service URI.\n' +
@@ -20,7 +20,6 @@ export async function connectCommand(args: string[]): Promise<void> {
       );
     }
     uri = detected;
-    setupPortForwarding(uri);
     console.log(`Auto-detected: ${uri}`);
   } else {
     // Normalize and forward port if needed
