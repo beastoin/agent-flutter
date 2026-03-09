@@ -6,9 +6,9 @@ CLI for AI agents to control Flutter apps via Dart VM Service + Marionette. Same
 
 ## Demo: Omi App E2E Testing
 
-https://github.com/beastoin/agent-flutter/releases/download/v1.1.0/e2e-side-by-side.mp4
+![Omi E2E Demo](assets/e2e-demo.gif)
 
-> 4 core flows tested side-by-side (screen capture + live test log). 25/25 assertions pass — language selection, tab navigation, settings toggle, and full round-trip.
+> 4 core flows tested side-by-side (screen + live test log). 25/25 pass — language selection, tab navigation, settings toggle, full round-trip. [Full video](https://github.com/beastoin/agent-flutter/releases/download/v1.1.0/e2e-side-by-side.mp4)
 
 ## Prerequisites
 
