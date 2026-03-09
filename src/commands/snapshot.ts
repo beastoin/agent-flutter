@@ -42,13 +42,19 @@ export async function snapshotCommand(args: string[]): Promise<void> {
     }
 
     if (isJson) {
+      const { refs } = formatSnapshot(elements);
+      updateRefs(session, refs);
+      session.lastSnapshot = elements;
+      session.isolateId = client.currentIsolateId!;
+      saveSession(session);
       console.log(JSON.stringify(formatSnapshotJson(elements)));
       return;
     }
 
     if (isDiff) {
       const prev = session.lastSnapshot;
-      const { lines: currentLines } = formatSnapshot(elements);
+      const { lines: currentLines, refs } = formatSnapshot(elements);
+      updateRefs(session, refs);
 
       if (prev.length === 0) {
         console.log('(baseline initialized)');

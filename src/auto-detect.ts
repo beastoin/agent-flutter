@@ -14,11 +14,12 @@ export function detectVmServiceUri(deviceId?: string): string | null {
       encoding: 'utf-8',
       timeout: 10000,
     });
-    // Match the VM Service URI pattern
-    const match = logcat.match(/http:\/\/127\.0\.0\.1:\d+\/[^/]+\//);
-    if (!match) return null;
+    // Match ALL VM Service URI patterns and take the LAST one (most recent).
+    // logcat -d dumps the entire buffer, so old entries from previous runs appear first.
+    const matches = logcat.match(/http:\/\/127\.0\.0\.1:\d+\/[^/]+\//g);
+    if (!matches || matches.length === 0) return null;
 
-    const httpUri = match[0];
+    const httpUri = matches[matches.length - 1];
     // Convert to WebSocket URI
     const wsUri = httpUri.replace('http://', 'ws://') + 'ws';
     return wsUri;

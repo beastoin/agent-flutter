@@ -23,6 +23,18 @@ test('detectVmServiceUri: no match returns null', () => {
   assert.equal(match, null);
 });
 
+test('detectVmServiceUri: picks last match (most recent)', () => {
+  const logcat = `
+I/flutter ( 1234): Observatory listening on http://127.0.0.1:40001/OldToken=/
+I/flutter ( 1234): Observatory listening on http://127.0.0.1:42003/NewToken=/
+  `;
+  const matches = logcat.match(/http:\/\/127\.0\.0\.1:\d+\/[^/]+\//g);
+  assert.ok(matches);
+  assert.equal(matches!.length, 2);
+  const lastUri = matches![matches!.length - 1];
+  assert.equal(lastUri, 'http://127.0.0.1:42003/NewToken=/');
+});
+
 test('port extraction from URI', () => {
   const uri = 'ws://127.0.0.1:42003/LhyO56VuSHI=/ws';
   const portMatch = uri.match(/:(\d+)\//);

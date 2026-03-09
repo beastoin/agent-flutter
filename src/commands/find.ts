@@ -13,19 +13,25 @@ import type { FlutterElement } from '../vm-client.ts';
 const HELP = `Usage: agent-flutter find <locator> <value> [action] [arg]
 
   Locators: key, text, type
-  Actions: press, fill "text", get text|type|key|attrs`;
+  Actions: press, fill "text", get text|type|key|attrs
+  Options: --index N  Select Nth match (0-based, default 0)`;
 
-function findElement(elements: FlutterElement[], locator: string, value: string): FlutterElement | null {
+function findAllMatches(elements: FlutterElement[], locator: string, value: string): FlutterElement[] {
   switch (locator) {
     case 'key':
-      return elements.find((el) => el.key === value) ?? null;
+      return elements.filter((el) => el.key === value);
     case 'text':
-      return elements.find((el) => el.text?.includes(value)) ?? null;
+      return elements.filter((el) => el.text?.includes(value));
     case 'type':
-      return elements.find((el) => el.type === value || normalizeType(el.type) === value) ?? null;
+      return elements.filter((el) => el.type === value || normalizeType(el.type) === value);
     default:
       throw new AgentFlutterError(ErrorCodes.INVALID_ARGS, `Unknown locator: ${locator}. Use: key, text, type`);
   }
+}
+
+function findElement(elements: FlutterElement[], locator: string, value: string, index = 0): FlutterElement | null {
+  const matches = findAllMatches(elements, locator, value);
+  return matches[index] ?? null;
 }
 
 export async function findCommand(args: string[]): Promise<void> {
@@ -41,10 +47,19 @@ export async function findCommand(args: string[]): Promise<void> {
   const session = loadSession();
   if (!session) throw new AgentFlutterError(ErrorCodes.NOT_CONNECTED, 'Not connected', 'Run: agent-flutter connect');
 
-  const locator = args[0];
-  const value = args[1];
-  const action = args[2];
-  const actionArg = args[3];
+  // Parse --index N from args
+  let matchIndex = 0;
+  const filteredArgs = [...args];
+  const indexFlagPos = filteredArgs.indexOf('--index');
+  if (indexFlagPos !== -1 && indexFlagPos + 1 < filteredArgs.length) {
+    matchIndex = parseInt(filteredArgs[indexFlagPos + 1], 10) || 0;
+    filteredArgs.splice(indexFlagPos, 2);
+  }
+
+  const locator = filteredArgs[0];
+  const value = filteredArgs[1];
+  const action = filteredArgs[2];
+  const actionArg = filteredArgs[3];
 
   const client = new VmServiceClient();
   await client.connect(session.vmServiceUri);
@@ -55,7 +70,7 @@ export async function findCommand(args: string[]): Promise<void> {
     session.lastSnapshot = elements;
     saveSession(session);
 
-    const found = findElement(elements, locator, value);
+    const found = findElement(elements, locator, value, matchIndex);
 
     // If element not found locally but action is press/fill and locator is text/key,
     // use Marionette's own matcher directly (handles button labels not in snapshot)
@@ -82,12 +97,13 @@ export async function findCommand(args: string[]): Promise<void> {
       throw new AgentFlutterError(ErrorCodes.ELEMENT_NOT_FOUND, `No element found with ${locator}="${value}"`);
     }
 
-    // Find its ref
-    const refEl = refs.find((r) =>
+    // Find its ref (match by index to stay consistent)
+    const matchingRefs = refs.filter((r) =>
       (locator === 'key' && r.key === value) ||
       (locator === 'text' && r.text?.includes(value)) ||
       (locator === 'type' && (r.type === value || normalizeType(r.type) === value)),
     );
+    const refEl = matchingRefs[matchIndex];
 
     if (!action) {
       console.log(`Found: @${refEl?.ref} [${normalizeType(found.type)}] "${found.text ?? ''}"${found.key ? `  key=${found.key}` : ''}`);
