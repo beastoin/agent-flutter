@@ -30,6 +30,7 @@ export function detectVmServiceUri(deviceId?: string): string | null {
     const logcat = execSync(`adb -s ${device} logcat -d -s flutter`, {
       encoding: 'utf-8',
       timeout: 10000,
+      maxBuffer: 10 * 1024 * 1024, // 10MB — Omi logcat can exceed default 1MB
     });
     // Match ALL VM Service URI patterns and take the LAST one (most recent).
     // logcat -d dumps the entire buffer, so old entries from previous runs appear first.
@@ -58,6 +59,7 @@ export async function detectVmServiceUriAsync(deviceId?: string): Promise<string
     const logcat = execSync(`adb -s ${device} logcat -d -s flutter`, {
       encoding: 'utf-8',
       timeout: 10000,
+      maxBuffer: 10 * 1024 * 1024, // 10MB — Omi logcat can exceed default 1MB
     });
     const matches = logcat.match(/http:\/\/127\.0\.0\.1:\d+\/[^/]+\//g);
     if (!matches || matches.length === 0) return null;
