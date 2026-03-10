@@ -4,8 +4,6 @@
 
 CLI for AI agents to control Flutter apps via Dart VM Service + Marionette. Same `@ref` + snapshot workflow as `agent-device` and `agent-browser`.
 
-![demo](assets/e2e-demo.gif)
-
 ## Prerequisites
 
 ### Your Flutter app needs Marionette
@@ -77,7 +75,7 @@ agent-flutter connect ws://127.0.0.1:38047/abc=/ws
 | `disconnect` | Disconnect from Flutter app | `agent-flutter disconnect` |
 | `status` | Show connection state | `agent-flutter status` |
 | `snapshot [-i] [-c] [-d N] [--diff]` | Capture widget snapshot with refs | `agent-flutter snapshot -i` |
-| `press <ref>` | Tap element by ref | `agent-flutter press @e3` |
+| `press <ref> \| <x> <y>` | Tap by ref, coordinates, or ref via ADB (`--adb`) | `agent-flutter press @e3` |
 | `fill <ref> <text>` | Enter text by ref | `agent-flutter fill @e5 "hello"` |
 | `get <property> <ref>` | Read `text`, `type`, `key`, or `attrs` | `agent-flutter get attrs @e3` |
 | `find <locator> <value> [action] [arg]` | Find by `key`, `text`, or `type` | `agent-flutter find text "Submit" press` |
@@ -120,8 +118,7 @@ agent-flutter connect ws://127.0.0.1:38047/abc=/ws
 | Variable | Purpose | Default |
 |---|---|---|
 | `AGENT_FLUTTER_DEVICE` | ADB device ID | `emulator-5554` |
-| `AGENT_FLUTTER_URI` | VM Service URI for `connect` | auto-detect |
-| `AGENT_FLUTTER_LOG` | Path to `flutter run` log file for reliable URI detection | unset |
+| `AGENT_FLUTTER_URI` | VM Service URI for `connect` | auto-detect from logcat |
 | `AGENT_FLUTTER_TIMEOUT` | Default `wait` timeout (ms) | `10000` |
 | `AGENT_FLUTTER_JSON` | JSON output mode (`1`) | unset |
 

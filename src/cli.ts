@@ -21,7 +21,7 @@ Commands:
   disconnect               Disconnect from Flutter app
   status                   Show connection state
   snapshot [-i] [-c] [-d N] [--json] [--diff]  Widget tree with @refs
-  press @ref               Tap element by ref
+  press @ref [--adb]       Tap element by ref (or via ADB with --adb)
   fill @ref "text"         Enter text by ref
   get text|type|key @ref   Read element property
   find <locator> <value> [action] [arg]   Find + optional action
@@ -35,7 +35,7 @@ Commands:
   screenshot [path]        Capture screenshot
   reload                   Hot reload the Flutter app
   logs                     Get Flutter app logs
-  tap <x> <y> | @ref       Tap at coordinates via ADB (bypasses Marionette)
+  press <x> <y>            Tap at coordinates via ADB
   dismiss [--check]        Dismiss Android system dialog via ADB
   schema [cmd]             Show command schema (JSON)
   doctor                   Check prerequisites and diagnose issues
@@ -108,7 +108,8 @@ function validateInputs(command: string, cmdArgs: string[]): void {
 
   // Commands that take a ref as arg
   if (command === 'press') {
-    if (cmdArgs[0] && !cmdArgs[0].startsWith('-')) validateRef(cmdArgs[0]);
+    // Skip ref validation when first arg is a number (coordinate mode)
+    if (cmdArgs[0] && !cmdArgs[0].startsWith('-') && !/^\d+$/.test(cmdArgs[0])) validateRef(cmdArgs[0]);
   }
   if (command === 'get') {
     // get <property> @ref — ref is second arg
@@ -251,9 +252,6 @@ async function main(): Promise<void> {
         break;
       case 'dismiss':
         await (await import('./commands/dismiss.ts')).dismissCommand(cmdArgs);
-        break;
-      case 'tap':
-        await (await import('./commands/tap.ts')).tapCommand(cmdArgs);
         break;
       case 'doctor':
         await (await import('./commands/doctor.ts')).doctorCommand(cmdArgs);

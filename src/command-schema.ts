@@ -64,11 +64,17 @@ export const COMMAND_SCHEMAS: CommandSchema[] = [
   },
   {
     name: 'press',
-    description: 'Tap element by ref',
-    args: [{ name: 'ref', required: true, description: 'Element reference (e.g. @e3)' }],
-    flags: [{ name: '--dry-run', description: 'Resolve target without executing' }],
+    description: 'Tap element by ref or coordinates',
+    args: [
+      { name: 'target', required: true, description: '@ref (e.g. @e3) or x y coordinates (physical pixels)' },
+      { name: 'y', required: false, description: 'Y coordinate (required when target is x coordinate)' },
+    ],
+    flags: [
+      { name: '--adb', description: 'Force ADB tap instead of Marionette (for ref targets)' },
+      { name: '--dry-run', description: 'Resolve target without executing' },
+    ],
     exitCodes: { '0': 'success', '2': 'error' },
-    examples: ['agent-flutter press @e3'],
+    examples: ['agent-flutter press @e3', 'agent-flutter press 540 1200', 'agent-flutter press @e3 --adb'],
   },
   {
     name: 'fill',
@@ -189,19 +195,6 @@ export const COMMAND_SCHEMAS: CommandSchema[] = [
     flags: [],
     exitCodes: { '0': 'success', '2': 'error' },
     examples: ['agent-flutter logs'],
-  },
-  {
-    name: 'tap',
-    description: 'Tap at coordinates via ADB (bypasses Marionette)',
-    args: [
-      { name: 'x', required: true, description: 'X coordinate (physical pixels) or @ref' },
-      { name: 'y', required: false, description: 'Y coordinate (physical pixels, required if x is not a ref)' },
-    ],
-    flags: [
-      { name: '--dry-run', description: 'Show coordinates without tapping' },
-    ],
-    exitCodes: { '0': 'success', '2': 'error' },
-    examples: ['agent-flutter tap 200 400', 'agent-flutter tap @e3'],
   },
   {
     name: 'dismiss',
