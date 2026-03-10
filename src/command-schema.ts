@@ -191,6 +191,29 @@ export const COMMAND_SCHEMAS: CommandSchema[] = [
     examples: ['agent-flutter logs'],
   },
   {
+    name: 'tap',
+    description: 'Tap at coordinates via ADB (bypasses Marionette)',
+    args: [
+      { name: 'x', required: true, description: 'X coordinate (physical pixels) or @ref' },
+      { name: 'y', required: false, description: 'Y coordinate (physical pixels, required if x is not a ref)' },
+    ],
+    flags: [
+      { name: '--dry-run', description: 'Show coordinates without tapping' },
+    ],
+    exitCodes: { '0': 'success', '2': 'error' },
+    examples: ['agent-flutter tap 200 400', 'agent-flutter tap @e3'],
+  },
+  {
+    name: 'dismiss',
+    description: 'Dismiss Android system dialog via ADB',
+    args: [],
+    flags: [
+      { name: '--check', description: 'Check if dialog is present without dismissing (exit 0=yes, 1=no)' },
+    ],
+    exitCodes: { '0': 'dismissed/present', '1': 'no dialog', '2': 'error' },
+    examples: ['agent-flutter dismiss', 'agent-flutter dismiss --check'],
+  },
+  {
     name: 'doctor',
     description: 'Check prerequisites: ADB, device, Flutter app, Marionette, session',
     args: [],

@@ -35,6 +35,8 @@ Commands:
   screenshot [path]        Capture screenshot
   reload                   Hot reload the Flutter app
   logs                     Get Flutter app logs
+  tap <x> <y> | @ref       Tap at coordinates via ADB (bypasses Marionette)
+  dismiss [--check]        Dismiss Android system dialog via ADB
   schema [cmd]             Show command schema (JSON)
   doctor                   Check prerequisites and diagnose issues
   diff snapshot            Show changes since last snapshot
@@ -246,6 +248,12 @@ async function main(): Promise<void> {
         break;
       case 'logs':
         await (await import('./commands/logs.ts')).logsCommand(cmdArgs);
+        break;
+      case 'dismiss':
+        await (await import('./commands/dismiss.ts')).dismissCommand(cmdArgs);
+        break;
+      case 'tap':
+        await (await import('./commands/tap.ts')).tapCommand(cmdArgs);
         break;
       case 'doctor':
         await (await import('./commands/doctor.ts')).doctorCommand(cmdArgs);
