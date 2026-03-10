@@ -8,7 +8,7 @@ import { connectCommand } from './commands/connect.ts';
 import { disconnectCommand } from './commands/disconnect.ts';
 import { statusCommand } from './commands/status.ts';
 import { snapshotCommand } from './commands/snapshot.ts';
-import { formatError } from './errors.ts';
+import { AgentFlutterError, ErrorCodes, formatError } from './errors.ts';
 import { getSchema } from './command-schema.ts';
 import { validateRef, validateTextArg, validatePathArg, validateDeviceId } from './validate.ts';
 
@@ -264,10 +264,19 @@ async function main(): Promise<void> {
           process.exit(2);
         }
         break;
-      default:
-        const unknownErr = formatError(new Error(`Unknown command: ${command}. Run 'agent-flutter --help' for usage.`), jsonMode);
+      default: {
+        // Suggest renamed/merged commands so agents auto-recover
+        const suggestions: Record<string, string> = {
+          tap: 'Use "press <x> <y>" for coordinate tap, or "press @ref --adb" for ADB ref tap',
+        };
+        const hint = suggestions[command] ?? "Run 'agent-flutter --help' for usage";
+        const unknownErr = formatError(
+          new AgentFlutterError(ErrorCodes.INVALID_ARGS, `Unknown command: ${command}`, hint),
+          jsonMode,
+        );
         if (jsonMode) console.log(unknownErr); else console.error(unknownErr);
         process.exit(2);
+      }
     }
   } catch (err) {
     const errOutput = formatError(err, jsonMode);
