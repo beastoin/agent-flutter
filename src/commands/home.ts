@@ -1,17 +1,17 @@
 /**
- * home [--dry-run] — Android home button via ADB.
+ * home [--dry-run] — Home button (ADB keyevent on Android, simctl on iOS).
  */
-import { execSync } from 'node:child_process';
+import { resolveTransport } from '../transport/index.ts';
 
 export async function homeCommand(args?: string[]): Promise<void> {
   const isDryRun = args?.includes('--dry-run') || process.env.AGENT_FLUTTER_DRY_RUN === '1';
-  const deviceId = process.env.AGENT_FLUTTER_DEVICE ?? 'emulator-5554';
+  const transport = resolveTransport();
 
   if (isDryRun) {
-    console.log(JSON.stringify({ dryRun: true, command: 'home', device: deviceId }));
+    console.log(JSON.stringify({ dryRun: true, command: 'home', device: transport.deviceId, platform: transport.platform }));
     return;
   }
 
-  execSync(`adb -s ${deviceId} shell input keyevent 3`, { timeout: 5000 });
+  transport.keyevent('home');
   console.log('Home');
 }

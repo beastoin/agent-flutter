@@ -1,28 +1,23 @@
 /**
- * scroll @ref|up|down|left|right [amount] [--dry-run] — Scroll element into view or page scroll via ADB.
+ * scroll @ref|up|down|left|right [amount] [--dry-run] — Scroll element into view or page scroll.
  */
-import { execSync } from 'node:child_process';
 import { VmServiceClient } from '../vm-client.ts';
 import { loadSession, resolveRef } from '../session.ts';
+import { resolveTransport } from '../transport/index.ts';
 import { AgentFlutterError, ErrorCodes } from '../errors.ts';
 
 const HELP = `Usage: agent-flutter scroll <target>
 
   scroll @ref              Scroll element into view via Marionette
-  scroll down [amount]     Scroll down via ADB (amount: multiplier, default 1)
-  scroll up [amount]       Scroll up via ADB
-  scroll left [amount]     Scroll left via ADB
-  scroll right [amount]    Scroll right via ADB
+  scroll down [amount]     Scroll down (amount: multiplier, default 1)
+  scroll up [amount]       Scroll up
+  scroll left [amount]     Scroll left
+  scroll right [amount]    Scroll right
 
 Options:
   --dry-run  Show intended action without executing`;
 
-const SWIPE_COORDS: Record<string, [number, number, number, number]> = {
-  down:  [540, 1500, 540, 500],
-  up:    [540, 500, 540, 1500],
-  left:  [900, 960, 100, 960],
-  right: [100, 960, 900, 960],
-};
+const DIRECTIONS = ['down', 'up', 'left', 'right'];
 
 export async function scrollCommand(args: string[]): Promise<void> {
   if (args.includes('--help') || args.includes('-h')) {
@@ -38,21 +33,47 @@ export async function scrollCommand(args: string[]): Promise<void> {
   }
 
   const target = positionals[0];
-  const deviceId = process.env.AGENT_FLUTTER_DEVICE ?? 'emulator-5554';
 
-  // Direction-based ADB scroll
-  if (SWIPE_COORDS[target]) {
+  // Direction-based scroll via transport
+  if (DIRECTIONS.includes(target)) {
+    const transport = resolveTransport();
+
     if (isDryRun) {
-      console.log(JSON.stringify({ dryRun: true, command: 'scroll', direction: target, device: deviceId }));
+      console.log(JSON.stringify({ dryRun: true, command: 'scroll', direction: target, device: transport.deviceId, platform: transport.platform }));
       return;
     }
+
     const amount = positionals[1] ? parseFloat(positionals[1]) : 1;
-    const [x1, y1, x2, y2] = SWIPE_COORDS[target];
-    const dx = (x2 - x1) * amount;
-    const dy = (y2 - y1) * amount;
-    execSync(`adb -s ${deviceId} shell input swipe ${x1} ${y1} ${Math.round(x1 + dx)} ${Math.round(y1 + dy)} 300`, {
-      timeout: 5000,
-    });
+    const screen = transport.getScreenSize();
+    const cx = screen.width / 2;
+
+    // Compute swipe coords based on direction and screen size
+    let x1: number, y1: number, x2: number, y2: number;
+    const scrollDist = screen.height * 0.5 * amount; // vertical scroll distance
+    const hScrollDist = screen.width * 0.7 * amount; // horizontal scroll distance
+
+    switch (target) {
+      case 'down':
+        x1 = cx; y1 = Math.round(screen.height * 0.75);
+        x2 = cx; y2 = Math.round(screen.height * 0.75 - scrollDist);
+        break;
+      case 'up':
+        x1 = cx; y1 = Math.round(screen.height * 0.25);
+        x2 = cx; y2 = Math.round(screen.height * 0.25 + scrollDist);
+        break;
+      case 'left':
+        x1 = Math.round(screen.width * 0.8); y1 = Math.round(screen.height / 2);
+        x2 = Math.round(screen.width * 0.8 - hScrollDist); y2 = Math.round(screen.height / 2);
+        break;
+      case 'right':
+        x1 = Math.round(screen.width * 0.2); y1 = Math.round(screen.height / 2);
+        x2 = Math.round(screen.width * 0.2 + hScrollDist); y2 = Math.round(screen.height / 2);
+        break;
+      default:
+        throw new AgentFlutterError(ErrorCodes.INVALID_ARGS, `Unknown direction: ${target}`);
+    }
+
+    transport.swipe(x1, y1, x2, y2, 300);
     console.log(`Scrolled ${target}`);
     return;
   }

@@ -70,11 +70,11 @@ export const COMMAND_SCHEMAS: CommandSchema[] = [
       { name: 'y', required: false, description: 'Y coordinate (required when target is x coordinate)' },
     ],
     flags: [
-      { name: '--adb', description: 'Force ADB tap instead of Marionette (for ref targets)' },
+      { name: '--native', description: 'Force native tap instead of Marionette (for ref targets)' },
       { name: '--dry-run', description: 'Resolve target without executing' },
     ],
     exitCodes: { '0': 'success', '2': 'error' },
-    examples: ['agent-flutter press @e3', 'agent-flutter press 540 1200', 'agent-flutter press @e3 --adb'],
+    examples: ['agent-flutter press @e3', 'agent-flutter press 540 1200', 'agent-flutter press @e3 --native'],
   },
   {
     name: 'fill',
@@ -146,7 +146,7 @@ export const COMMAND_SCHEMAS: CommandSchema[] = [
   },
   {
     name: 'swipe',
-    description: 'Swipe gesture via ADB',
+    description: 'Swipe gesture',
     args: [{ name: 'direction', required: true, description: 'Direction: up, down, left, right' }],
     flags: [
       { name: '--distance N', description: 'Fraction of screen to swipe', default: '0.5' },
@@ -158,7 +158,7 @@ export const COMMAND_SCHEMAS: CommandSchema[] = [
   },
   {
     name: 'back',
-    description: 'Android back button via ADB',
+    description: 'Navigate back',
     args: [],
     flags: [{ name: '--dry-run', description: 'Show intended action without executing' }],
     exitCodes: { '0': 'success', '2': 'error' },
@@ -166,7 +166,7 @@ export const COMMAND_SCHEMAS: CommandSchema[] = [
   },
   {
     name: 'home',
-    description: 'Android home button via ADB',
+    description: 'Home button',
     args: [],
     flags: [{ name: '--dry-run', description: 'Show intended action without executing' }],
     exitCodes: { '0': 'success', '2': 'error' },
@@ -198,7 +198,7 @@ export const COMMAND_SCHEMAS: CommandSchema[] = [
   },
   {
     name: 'dismiss',
-    description: 'Dismiss Android system dialog via ADB',
+    description: 'Dismiss system dialog',
     args: [],
     flags: [
       { name: '--check', description: 'Check if dialog is present without dismissing (exit 0=yes, 1=no)' },
@@ -208,7 +208,7 @@ export const COMMAND_SCHEMAS: CommandSchema[] = [
   },
   {
     name: 'doctor',
-    description: 'Check prerequisites: ADB, device, Flutter app, Marionette, session',
+    description: 'Check prerequisites: platform tools, device, Flutter app, Marionette, session',
     args: [],
     flags: [],
     exitCodes: { '0': 'all checks pass', '2': 'one or more checks failed' },

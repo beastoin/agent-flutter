@@ -21,7 +21,8 @@ Commands:
   disconnect               Disconnect from Flutter app
   status                   Show connection state
   snapshot [-i] [-c] [-d N] [--json] [--diff]  Widget tree with @refs
-  press @ref [--adb]       Tap element by ref (or via ADB with --adb)
+  press @ref [--native]    Tap element by ref (or via native input with --native)
+  press <x> <y>            Tap at coordinates via native input
   fill @ref "text"         Enter text by ref
   get text|type|key @ref   Read element property
   find <locator> <value> [action] [arg]   Find + optional action
@@ -29,20 +30,20 @@ Commands:
   wait <ms>                Simple delay
   is exists|visible @ref   Assert element state (exit 0=true, 1=false)
   scroll @ref|up|down      Scroll element or page
-  swipe up|down|left|right Swipe gesture via ADB
-  back                     Android back button
-  home                     Android home button
+  swipe up|down|left|right Swipe gesture
+  back                     Navigate back
+  home                     Home button
   screenshot [path]        Capture screenshot
   reload                   Hot reload the Flutter app
   logs                     Get Flutter app logs
-  press <x> <y>            Tap at coordinates via ADB
-  dismiss [--check]        Dismiss Android system dialog via ADB
+  dismiss [--check]        Dismiss system dialog
   schema [cmd]             Show command schema (JSON)
   doctor                   Check prerequisites and diagnose issues
   diff snapshot            Show changes since last snapshot
 
 Global flags:
-  --device <id>            ADB device ID (default: emulator-5554)
+  --device <id>            Device ID (default: emulator-5554 on Android, booted on iOS)
+  --platform <os>          Force platform: android or ios (auto-detected from device ID)
   --json                   Machine-readable JSON output on all commands
   --no-json                Force human-readable output (overrides env/TTY)
   --dry-run                Resolve targets without executing (mutating commands)
@@ -51,18 +52,22 @@ Global flags:
 
 export type GlobalFlags = {
   deviceId: string;
+  platform: string;
   json: boolean;
   noJson: boolean;
   dryRun: boolean;
 };
 
 function parseGlobalFlags(args: string[]): { flags: GlobalFlags; rest: string[] } {
-  const flags: GlobalFlags = { deviceId: '', json: false, noJson: false, dryRun: false };
+  const flags: GlobalFlags = { deviceId: '', platform: '', json: false, noJson: false, dryRun: false };
   const rest: string[] = [];
   let i = 0;
   while (i < args.length) {
     if ((args[i] === '--device' || args[i] === '--serial') && i + 1 < args.length) {
       flags.deviceId = args[i + 1];
+      i += 2;
+    } else if (args[i] === '--platform' && i + 1 < args.length) {
+      flags.platform = args[i + 1];
       i += 2;
     } else if (args[i] === '--json') {
       flags.json = true;
@@ -152,6 +157,7 @@ async function main(): Promise<void> {
 
   // Store global flags for all commands
   process.env.AGENT_FLUTTER_DEVICE = deviceId;
+  if (flags.platform) process.env.AGENT_FLUTTER_PLATFORM = flags.platform;
   if (jsonMode) process.env.AGENT_FLUTTER_JSON = '1';
   else delete process.env.AGENT_FLUTTER_JSON;
   if (flags.dryRun) process.env.AGENT_FLUTTER_DRY_RUN = '1';
@@ -267,7 +273,7 @@ async function main(): Promise<void> {
       default: {
         // Suggest renamed/merged commands so agents auto-recover
         const suggestions: Record<string, string> = {
-          tap: 'Use "press <x> <y>" for coordinate tap, or "press @ref --adb" for ADB ref tap',
+          tap: 'Use "press <x> <y>" for coordinate tap, or "press @ref --native" for native ref tap',
         };
         const hint = suggestions[command] ?? "Run 'agent-flutter --help' for usage";
         const unknownErr = formatError(

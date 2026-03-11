@@ -6,6 +6,9 @@ import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 
+import type { StdioOptions } from 'node:child_process';
+const PIPE_STDIO: StdioOptions = ['pipe', 'pipe', 'pipe'];
+
 /**
  * Check if a TCP port is open on localhost.
  */
@@ -59,6 +62,7 @@ export function detectVmServiceUri(deviceId?: string): string | null {
       encoding: 'utf-8',
       timeout: 10000,
       maxBuffer: 10 * 1024 * 1024, // 10MB — Omi logcat can exceed default 1MB
+      stdio: PIPE_STDIO,
     });
     // Match ALL VM Service URI patterns and take the LAST one (most recent).
     // logcat -d dumps the entire buffer, so old entries from previous runs appear first.
@@ -92,12 +96,16 @@ export async function detectVmServiceUriAsync(deviceId?: string): Promise<string
   }
 
   // Priority 2: logcat (device-side, less reliable)
+  // Skip on iOS — logcat is Android-only
+  if (process.env.AGENT_FLUTTER_PLATFORM === 'ios') return null;
+
   const device = deviceId ?? process.env.AGENT_FLUTTER_DEVICE ?? 'emulator-5554';
   try {
     const logcat = execSync(`adb -s ${device} logcat -d -s flutter`, {
       encoding: 'utf-8',
       timeout: 10000,
       maxBuffer: 10 * 1024 * 1024, // 10MB — Omi logcat can exceed default 1MB
+      stdio: PIPE_STDIO,
     });
     const matches = logcat.match(/http:\/\/127\.0\.0\.1:\d+\/[^/]+\//g);
     if (!matches || matches.length === 0) return null;
@@ -112,7 +120,7 @@ export async function detectVmServiceUriAsync(deviceId?: string): Promise<string
 
       // Set up port forwarding
       try {
-        execSync(`adb -s ${device} forward tcp:${port} tcp:${port}`, { timeout: 5000 });
+        execSync(`adb -s ${device} forward tcp:${port} tcp:${port}`, { timeout: 5000, stdio: PIPE_STDIO });
       } catch { /* may already exist */ }
 
       // Check if port is actually open
@@ -127,15 +135,18 @@ export async function detectVmServiceUriAsync(deviceId?: string): Promise<string
 }
 
 /**
- * Extract port from a VM Service URI and set up ADB port forwarding.
+ * Extract port from a VM Service URI and set up port forwarding via transport.
  */
 export function setupPortForwarding(uri: string, deviceId?: string): void {
   const device = deviceId ?? process.env.AGENT_FLUTTER_DEVICE ?? 'emulator-5554';
   const portMatch = uri.match(/:(\d+)\//);
   if (!portMatch) return;
   const port = portMatch[1];
+  // Use ADB for Android, no-op for iOS (simulator shares host network)
+  const platform = process.env.AGENT_FLUTTER_PLATFORM;
+  if (platform === 'ios') return;
   try {
-    execSync(`adb -s ${device} forward tcp:${port} tcp:${port}`, { timeout: 5000 });
+    execSync(`adb -s ${device} forward tcp:${port} tcp:${port}`, { timeout: 5000, stdio: PIPE_STDIO });
   } catch {
     // Port forwarding may already exist
   }

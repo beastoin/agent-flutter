@@ -1,7 +1,8 @@
 /**
  * doctor — Check prerequisites and diagnose connection issues.
+ * Platform-aware: checks ADB on Android, xcrun simctl on iOS.
  */
-import { execSync } from 'node:child_process';
+import { resolveTransport } from '../transport/index.ts';
 import { detectVmServiceUri } from '../auto-detect.ts';
 import { loadSession } from '../session.ts';
 import { VmServiceClient } from '../vm-client.ts';
@@ -15,66 +16,61 @@ type Check = {
 
 export async function doctorCommand(args: string[]): Promise<void> {
   const isJson = process.env.AGENT_FLUTTER_JSON === '1';
-  const deviceId = process.env.AGENT_FLUTTER_DEVICE ?? 'emulator-5554';
+  const transport = resolveTransport();
   const checks: Check[] = [];
 
-  // 1. ADB available
-  try {
-    execSync('adb version', { encoding: 'utf-8', timeout: 5000, stdio: 'pipe' });
-    checks.push({ name: 'adb', status: 'pass', message: 'ADB is installed' });
-  } catch {
-    checks.push({
-      name: 'adb',
-      status: 'fail',
-      message: 'ADB not found',
-      fix: 'Install Android SDK Platform Tools and add to PATH',
-    });
+  // 0. Platform
+  checks.push({ name: 'platform', status: 'pass', message: `${transport.platform} (device: ${transport.deviceId})` });
+
+  // 1. Platform tool available
+  const toolCheck = transport.checkToolInstalled();
+  if (toolCheck.ok) {
+    checks.push({ name: 'tool', status: 'pass', message: toolCheck.message });
+  } else {
+    checks.push({ name: 'tool', status: 'fail', message: toolCheck.message });
   }
 
   // 2. Device connected
-  if (checks[0].status === 'pass') {
-    try {
-      const devices = execSync('adb devices', { encoding: 'utf-8', timeout: 5000, stdio: 'pipe' });
-      const lines = devices.trim().split('\n').slice(1).filter((l) => l.includes('\tdevice'));
-      if (lines.length === 0) {
+  if (toolCheck.ok) {
+    const devices = transport.listDevices();
+    if (devices.length === 0) {
+      const fix = transport.platform === 'android'
+        ? 'Connect a device via USB or start an emulator: emulator -avd <name>'
+        : 'Boot a simulator: xcrun simctl boot <device>';
+      checks.push({ name: 'device', status: 'fail', message: 'No devices connected', fix });
+    } else {
+      const targetFound = devices.includes(transport.deviceId) || transport.deviceId === 'booted';
+      if (targetFound) {
+        checks.push({ name: 'device', status: 'pass', message: `Device ${transport.deviceId} connected` });
+      } else {
+        const available = devices.join(', ');
         checks.push({
           name: 'device',
-          status: 'fail',
-          message: 'No ADB devices connected',
-          fix: 'Connect a device via USB or start an emulator: emulator -avd <name>',
+          status: 'warn',
+          message: `Target device ${transport.deviceId} not found. Available: ${available}`,
+          fix: `Use --device <id> or set AGENT_FLUTTER_DEVICE=${devices[0]}`,
         });
-      } else {
-        const targetFound = lines.some((l) => l.startsWith(deviceId));
-        if (targetFound) {
-          checks.push({ name: 'device', status: 'pass', message: `Device ${deviceId} connected` });
-        } else {
-          const available = lines.map((l) => l.split('\t')[0]).join(', ');
-          checks.push({
-            name: 'device',
-            status: 'warn',
-            message: `Target device ${deviceId} not found. Available: ${available}`,
-            fix: `Use --device <id> or set AGENT_FLUTTER_DEVICE=${lines[0].split('\t')[0]}`,
-          });
-        }
       }
-    } catch {
-      checks.push({ name: 'device', status: 'fail', message: 'Failed to list ADB devices' });
     }
   } else {
-    checks.push({ name: 'device', status: 'fail', message: 'Skipped (ADB not available)' });
+    checks.push({ name: 'device', status: 'fail', message: 'Skipped (platform tool not available)' });
   }
 
-  // 3. Flutter app running (VM Service URI in logcat)
+  // 3. Flutter app running (VM Service URI)
   let vmUri: string | null = null;
-  if (checks[0].status === 'pass') {
-    vmUri = detectVmServiceUri(deviceId);
+  if (toolCheck.ok) {
+    vmUri = transport.detectVmServiceUri();
+    // Only try ADB-based detection on Android
+    if (!vmUri && transport.platform === 'android') {
+      vmUri = detectVmServiceUri(transport.deviceId);
+    }
     if (vmUri) {
       checks.push({ name: 'flutter_app', status: 'pass', message: `VM Service found: ${vmUri}` });
     } else {
       checks.push({
         name: 'flutter_app',
         status: 'fail',
-        message: 'No Flutter VM Service URI found in logcat',
+        message: 'No Flutter VM Service URI found',
         fix: 'Launch app with: flutter run (not adb install). The app must be running in debug or profile mode.',
       });
     }
@@ -117,7 +113,9 @@ export async function doctorCommand(args: string[]): Promise<void> {
           name: 'marionette',
           status: 'fail',
           message: `Connection failed: ${msg}`,
-          fix: 'Check that the VM Service port is forwarded: adb forward tcp:<port> tcp:<port>',
+          fix: transport.platform === 'android'
+            ? 'Check that the VM Service port is forwarded: adb forward tcp:<port> tcp:<port>'
+            : 'Check that the VM Service is accessible on localhost',
         });
       }
     }

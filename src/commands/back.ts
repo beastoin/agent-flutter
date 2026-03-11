@@ -1,17 +1,17 @@
 /**
- * back [--dry-run] — Android back button via ADB.
+ * back [--dry-run] — Navigate back (ADB keyevent on Android, swipe-from-edge on iOS).
  */
-import { execSync } from 'node:child_process';
+import { resolveTransport } from '../transport/index.ts';
 
 export async function backCommand(args?: string[]): Promise<void> {
   const isDryRun = args?.includes('--dry-run') || process.env.AGENT_FLUTTER_DRY_RUN === '1';
-  const deviceId = process.env.AGENT_FLUTTER_DEVICE ?? 'emulator-5554';
+  const transport = resolveTransport();
 
   if (isDryRun) {
-    console.log(JSON.stringify({ dryRun: true, command: 'back', device: deviceId }));
+    console.log(JSON.stringify({ dryRun: true, command: 'back', device: transport.deviceId, platform: transport.platform }));
     return;
   }
 
-  execSync(`adb -s ${deviceId} shell input keyevent 4`, { timeout: 5000 });
+  transport.keyevent('back');
   console.log('Back');
 }
