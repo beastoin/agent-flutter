@@ -714,13 +714,22 @@ var init_adb = __esm({
         return 2.625;
       }
       dumpText() {
-        try {
-          this.exec("shell uiautomator dump /sdcard/window_dump.xml", { timeout: 1e4 });
-          const xml = this.exec("shell cat /sdcard/window_dump.xml", { timeout: 5e3, maxBuffer: 5 * 1024 * 1024 });
-          return parseUiAutomatorXml(xml);
-        } catch {
-          return [];
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            this.exec("shell uiautomator dump /sdcard/window_dump.xml", { timeout: 1e4 });
+            const xml = this.exec("shell cat /sdcard/window_dump.xml", { timeout: 5e3, maxBuffer: 5 * 1024 * 1024 });
+            const entries = parseUiAutomatorXml(xml);
+            if (entries.length > 0) return entries;
+          } catch {
+          }
+          if (attempt < 2) {
+            try {
+              this.exec("shell sleep 0.5", { timeout: 3e3 });
+            } catch {
+            }
+          }
         }
+        return [];
       }
       detectVmServiceUri() {
         try {

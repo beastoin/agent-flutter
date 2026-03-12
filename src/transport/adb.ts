@@ -75,14 +75,24 @@ export class AdbTransport implements DeviceTransport {
   }
 
   dumpText(): TextEntry[] {
-    try {
-      // Dump UIAutomator XML to file, then cat it
-      this.exec('shell uiautomator dump /sdcard/window_dump.xml', { timeout: 10000 });
-      const xml = this.exec('shell cat /sdcard/window_dump.xml', { timeout: 5000, maxBuffer: 5 * 1024 * 1024 });
-      return parseUiAutomatorXml(xml);
-    } catch {
-      return [];
+    // UIAutomator's waitForIdle() fails on pages with continuous animations
+    // (loading spinners, shimmer effects, pulsing buttons). Retry up to 3 times
+    // with brief pauses to catch moments when the app settles between frames.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        this.exec('shell uiautomator dump /sdcard/window_dump.xml', { timeout: 10000 });
+        const xml = this.exec('shell cat /sdcard/window_dump.xml', { timeout: 5000, maxBuffer: 5 * 1024 * 1024 });
+        const entries = parseUiAutomatorXml(xml);
+        if (entries.length > 0) return entries;
+        // Got empty dump — retry after brief pause
+      } catch {
+        // "ERROR: could not get idle state" — retry after pause
+      }
+      if (attempt < 2) {
+        try { this.exec('shell sleep 0.5', { timeout: 3000 }); } catch { /* ignore */ }
+      }
     }
+    return [];
   }
 
   detectVmServiceUri(): string | null {
