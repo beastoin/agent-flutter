@@ -74,6 +74,29 @@ export class AdbTransport implements DeviceTransport {
     return 2.625;
   }
 
+  ensureAccessibility(): void {
+    // Flutter only generates the Semantics tree when an accessibility service
+    // is active (TalkBack on Android). Without it, debugDumpSemanticsTree
+    // returns "Semantics not generated". Enable once — idempotent.
+    try {
+      const current = this.exec('shell settings get secure accessibility_enabled', { timeout: 3000 });
+      if (current.trim() === '1') return; // Already enabled
+    } catch {
+      // Can't check — try to enable anyway
+    }
+    try {
+      this.exec(
+        'shell settings put secure enabled_accessibility_services com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService',
+        { timeout: 5000 },
+      );
+      this.exec('shell settings put secure accessibility_enabled 1', { timeout: 3000 });
+      // Brief wait for Flutter to pick up the accessibility change and build semantics tree
+      this.exec('shell sleep 0.5', { timeout: 3000 });
+    } catch {
+      // Best-effort — semantics may still work if accessibility was already enabled
+    }
+  }
+
   dumpText(): TextEntry[] {
     // UIAutomator's waitForIdle() fails on pages with continuous animations
     // (loading spinners, shimmer effects, pulsing buttons). Retry up to 3 times

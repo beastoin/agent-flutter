@@ -41,6 +41,7 @@ export interface DeviceTransport {
 
   // Text extraction (accessibility layer)
   dumpText(): TextEntry[];
+  ensureAccessibility(): void;
 
   // VM Service discovery
   detectVmServiceUri(): string | null;

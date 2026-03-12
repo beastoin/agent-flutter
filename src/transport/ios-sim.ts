@@ -199,6 +199,10 @@ end tell'`, { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
     return 3.0;
   }
 
+  ensureAccessibility(): void {
+    // iOS VoiceOver: not needed — Flutter generates semantics on iOS by default.
+  }
+
   dumpText(): TextEntry[] {
     // UIAutomator is Android-only. iOS accessibility text extraction
     // would require XCUITest or accessibility APIs (future phase).

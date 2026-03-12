@@ -216,11 +216,11 @@ export const COMMAND_SCHEMAS: CommandSchema[] = [
   },
   {
     name: 'text',
-    description: 'Extract visible text from Android accessibility layer (UIAutomator)',
+    description: 'Extract visible text (UIAutomator → Flutter semantics fallback)',
     args: [{ name: 'query', required: false, description: 'Text to search for (substring, case-insensitive)' }],
     flags: [
-      { name: '--json', description: 'JSON output' },
-      { name: '--all', description: 'Include source, class, bounds metadata (with --json)' },
+      { name: '--json', description: 'JSON output (includes method field: uiautomator or semantics)' },
+      { name: '--all', description: 'Include source metadata (with --json)' },
     ],
     exitCodes: { '0': 'success (or text found)', '1': 'text not found (search mode)', '2': 'error' },
     examples: [

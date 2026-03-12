@@ -168,6 +168,39 @@ export class VmServiceClient {
     return (response.result?.logs as string[]) ?? [];
   }
 
+  /**
+   * Call any registered Flutter service extension on the current isolate.
+   * Works for Marionette extensions AND built-in Flutter extensions
+   * (e.g. ext.flutter.debugDumpSemanticsTreeInTraversalOrder).
+   */
+  async callExtension(method: string, params?: Record<string, unknown>): Promise<Record<string, unknown>> {
+    this.ensureConnected();
+    const response = await this.call(method, {
+      isolateId: this.isolateId!,
+      ...params,
+    });
+    return response.result ?? {};
+  }
+
+  /**
+   * Dump the Flutter semantics tree in traversal order.
+   * Uses the built-in ext.flutter.debugDumpSemanticsTreeInTraversalOrder extension.
+   * Returns the text dump, or null if unavailable.
+   *
+   * This bypasses UIAutomator entirely — works on animated pages where
+   * UIAutomator's waitForIdle() never completes.
+   */
+  async dumpSemanticsTree(): Promise<string | null> {
+    try {
+      const result = await this.callExtension('ext.flutter.debugDumpSemanticsTreeInTraversalOrder');
+      const data = result.data;
+      if (typeof data === 'string' && data.length > 0) return data;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   async takeScreenshot(): Promise<Buffer | null> {
     this.ensureConnected();
     const response = await this.call('ext.flutter.marionette.takeScreenshots', {
