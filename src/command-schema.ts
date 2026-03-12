@@ -215,6 +215,23 @@ export const COMMAND_SCHEMAS: CommandSchema[] = [
     examples: ['agent-flutter doctor', 'agent-flutter --json doctor'],
   },
   {
+    name: 'text',
+    description: 'Extract visible text from Android accessibility layer (UIAutomator)',
+    args: [{ name: 'query', required: false, description: 'Text to search for (substring, case-insensitive)' }],
+    flags: [
+      { name: '--json', description: 'JSON output' },
+      { name: '--all', description: 'Include source, class, bounds metadata (with --json)' },
+    ],
+    exitCodes: { '0': 'success (or text found)', '1': 'text not found (search mode)', '2': 'error' },
+    examples: [
+      'agent-flutter text',
+      'agent-flutter text --json',
+      'agent-flutter text "Featured"',
+      'agent-flutter text "Sign In" --json',
+      'agent-flutter text --json --all',
+    ],
+  },
+  {
     name: 'schema',
     description: 'Show command schema for agent discovery',
     args: [{ name: 'command', required: false, description: 'Specific command to describe' }],

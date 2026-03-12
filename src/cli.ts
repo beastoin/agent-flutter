@@ -37,6 +37,7 @@ Commands:
   reload                   Hot reload the Flutter app
   logs                     Get Flutter app logs
   dismiss [--check]        Dismiss system dialog
+  text [query] [--all]     Visible text from accessibility layer (exit 0=found, 1=not found)
   schema [cmd]             Show command schema (JSON)
   doctor                   Check prerequisites and diagnose issues
   diff snapshot            Show changes since last snapshot
@@ -258,6 +259,9 @@ async function main(): Promise<void> {
         break;
       case 'dismiss':
         await (await import('./commands/dismiss.ts')).dismissCommand(cmdArgs);
+        break;
+      case 'text':
+        await (await import('./commands/text.ts')).textCommand(cmdArgs);
         break;
       case 'doctor':
         await (await import('./commands/doctor.ts')).doctorCommand(cmdArgs);

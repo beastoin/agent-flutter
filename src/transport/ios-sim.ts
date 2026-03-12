@@ -9,7 +9,7 @@
  */
 import { execSync } from 'node:child_process';
 import { readFileSync, unlinkSync } from 'node:fs';
-import type { DeviceTransport, ScreenSize, DialogInfo, ToolCheck } from './types.ts';
+import type { DeviceTransport, ScreenSize, DialogInfo, ToolCheck, TextEntry } from './types.ts';
 
 /** Logical resolution (points) for known device types */
 const DEVICE_LOGICAL_SIZES: Record<string, { width: number; height: number }> = {
@@ -197,6 +197,12 @@ end tell'`, { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
     if (dt.includes('iPhone-SE') || dt.includes('iPhone-8')) return 2.0;
     if (dt.includes('iPad-mini') || dt.includes('iPad-Air-2')) return 2.0;
     return 3.0;
+  }
+
+  dumpText(): TextEntry[] {
+    // UIAutomator is Android-only. iOS accessibility text extraction
+    // would require XCUITest or accessibility APIs (future phase).
+    return [];
   }
 
   detectVmServiceUri(): string | null {

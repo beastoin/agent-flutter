@@ -18,6 +18,13 @@ export interface ToolCheck {
   message: string;
 }
 
+export interface TextEntry {
+  text: string;
+  source: 'text' | 'content-desc';
+  class: string;
+  bounds: [number, number, number, number];
+}
+
 export interface DeviceTransport {
   readonly platform: 'android' | 'ios';
   readonly deviceId: string;
@@ -31,6 +38,9 @@ export interface DeviceTransport {
   screenshot(): Buffer;
   getScreenSize(): ScreenSize;
   getDensity(): number;
+
+  // Text extraction (accessibility layer)
+  dumpText(): TextEntry[];
 
   // VM Service discovery
   detectVmServiceUri(): string | null;

@@ -1,6 +1,6 @@
 {
   "name": "agent-flutter-cli",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "CLI for AI agents to control Flutter apps via Marionette (Dart VM Service)",
   "type": "module",
   "bin": {

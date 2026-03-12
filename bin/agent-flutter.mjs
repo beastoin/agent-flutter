@@ -294,8 +294,9 @@ function detectVmServiceUri(deviceId) {
     const logcat = execSync(`adb -s ${device} logcat -d -s flutter`, {
       encoding: "utf-8",
       timeout: 1e4,
-      maxBuffer: 10 * 1024 * 1024
+      maxBuffer: 10 * 1024 * 1024,
       // 10MB — Omi logcat can exceed default 1MB
+      stdio: PIPE_STDIO
     });
     const matches = logcat.match(/http:\/\/127\.0\.0\.1:\d+\/[^/]+\//g);
     if (!matches || matches.length === 0) return null;
@@ -315,13 +316,15 @@ async function detectVmServiceUriAsync(deviceId) {
       return fromLog;
     }
   }
+  if (process.env.AGENT_FLUTTER_PLATFORM === "ios") return null;
   const device = deviceId ?? process.env.AGENT_FLUTTER_DEVICE ?? "emulator-5554";
   try {
     const logcat = execSync(`adb -s ${device} logcat -d -s flutter`, {
       encoding: "utf-8",
       timeout: 1e4,
-      maxBuffer: 10 * 1024 * 1024
+      maxBuffer: 10 * 1024 * 1024,
       // 10MB — Omi logcat can exceed default 1MB
+      stdio: PIPE_STDIO
     });
     const matches = logcat.match(/http:\/\/127\.0\.0\.1:\d+\/[^/]+\//g);
     if (!matches || matches.length === 0) return null;
@@ -331,7 +334,7 @@ async function detectVmServiceUriAsync(deviceId) {
       if (!portMatch) continue;
       const port = parseInt(portMatch[1], 10);
       try {
-        execSync(`adb -s ${device} forward tcp:${port} tcp:${port}`, { timeout: 5e3 });
+        execSync(`adb -s ${device} forward tcp:${port} tcp:${port}`, { timeout: 5e3, stdio: PIPE_STDIO });
       } catch {
       }
       if (await isPortOpen(port)) {
@@ -348,14 +351,18 @@ function setupPortForwarding(uri, deviceId) {
   const portMatch = uri.match(/:(\d+)\//);
   if (!portMatch) return;
   const port = portMatch[1];
+  const platform = process.env.AGENT_FLUTTER_PLATFORM;
+  if (platform === "ios") return;
   try {
-    execSync(`adb -s ${device} forward tcp:${port} tcp:${port}`, { timeout: 5e3 });
+    execSync(`adb -s ${device} forward tcp:${port} tcp:${port}`, { timeout: 5e3, stdio: PIPE_STDIO });
   } catch {
   }
 }
+var PIPE_STDIO;
 var init_auto_detect = __esm({
   "src/auto-detect.ts"() {
     "use strict";
+    PIPE_STDIO = ["pipe", "pipe", "pipe"];
   }
 });
 
@@ -582,6 +589,496 @@ var init_errors = __esm({
   }
 });
 
+// src/text-parser.ts
+function parseUiAutomatorXml(xml) {
+  const entries = [];
+  const nodePattern = /<node\s[^>]*>/g;
+  let match;
+  while ((match = nodePattern.exec(xml)) !== null) {
+    const node = match[0];
+    const text = extractAttr(node, "text");
+    const contentDesc = extractAttr(node, "content-desc");
+    const cls = extractAttr(node, "class") ?? "";
+    const boundsStr = extractAttr(node, "bounds");
+    const bounds = parseBounds(boundsStr);
+    if (text) {
+      entries.push({ text, source: "text", class: cls, bounds });
+    }
+    if (contentDesc && contentDesc !== text) {
+      entries.push({ text: contentDesc, source: "content-desc", class: cls, bounds });
+    }
+  }
+  return entries;
+}
+function extractVisibleTexts(entries) {
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const entry of entries) {
+    const parts = entry.text.split("\n").map((s) => s.trim()).filter(Boolean);
+    for (const part of parts) {
+      if (!seen.has(part)) {
+        seen.add(part);
+        result.push(part);
+      }
+    }
+  }
+  return result;
+}
+function extractAttr(node, name) {
+  const pattern = new RegExp(`${name}="([^"]*)"`, "i");
+  const match = pattern.exec(node);
+  if (!match) return null;
+  const val = match[1].trim();
+  return val.length > 0 ? decodeXmlEntities(val) : null;
+}
+function parseBounds(boundsStr) {
+  if (!boundsStr) return [0, 0, 0, 0];
+  const match = boundsStr.match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);
+  if (!match) return [0, 0, 0, 0];
+  return [
+    parseInt(match[1], 10),
+    parseInt(match[2], 10),
+    parseInt(match[3], 10),
+    parseInt(match[4], 10)
+  ];
+}
+function decodeXmlEntities(s) {
+  return s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+}
+var init_text_parser = __esm({
+  "src/text-parser.ts"() {
+    "use strict";
+  }
+});
+
+// src/transport/adb.ts
+import { execSync as execSync2 } from "node:child_process";
+var AdbTransport;
+var init_adb = __esm({
+  "src/transport/adb.ts"() {
+    "use strict";
+    init_text_parser();
+    AdbTransport = class {
+      platform = "android";
+      deviceId;
+      constructor(deviceId) {
+        this.deviceId = deviceId;
+      }
+      exec(cmd, opts) {
+        return execSync2(`adb -s ${this.deviceId} ${cmd}`, {
+          encoding: "utf8",
+          timeout: opts?.timeout ?? 5e3,
+          maxBuffer: opts?.maxBuffer,
+          stdio: ["pipe", "pipe", "pipe"]
+        }).trim();
+      }
+      execRaw(cmd, opts) {
+        return execSync2(`adb -s ${this.deviceId} ${cmd}`, {
+          timeout: opts?.timeout ?? 1e4,
+          maxBuffer: opts?.maxBuffer ?? 10 * 1024 * 1024
+        });
+      }
+      tap(x, y) {
+        this.exec(`shell input tap ${x} ${y}`);
+      }
+      swipe(x1, y1, x2, y2, durationMs) {
+        this.exec(`shell input swipe ${Math.round(x1)} ${Math.round(y1)} ${Math.round(x2)} ${Math.round(y2)} ${durationMs}`);
+      }
+      keyevent(key) {
+        const code = key === "back" ? 4 : 3;
+        this.exec(`shell input keyevent ${code}`);
+      }
+      screenshot() {
+        return this.execRaw("shell screencap -p");
+      }
+      getScreenSize() {
+        try {
+          const output = this.exec("shell wm size");
+          const match = output.match(/size:\s*(\d+)x(\d+)/);
+          if (match) {
+            return { width: parseInt(match[1], 10), height: parseInt(match[2], 10) };
+          }
+        } catch {
+        }
+        return { width: 1080, height: 1920 };
+      }
+      getDensity() {
+        try {
+          const output = this.exec("shell wm density");
+          const match = output.match(/density:\s*(\d+)/);
+          if (match) {
+            return parseInt(match[1], 10) / 160;
+          }
+        } catch {
+        }
+        return 2.625;
+      }
+      dumpText() {
+        try {
+          this.exec("shell uiautomator dump /sdcard/window_dump.xml", { timeout: 1e4 });
+          const xml = this.exec("shell cat /sdcard/window_dump.xml", { timeout: 5e3, maxBuffer: 5 * 1024 * 1024 });
+          return parseUiAutomatorXml(xml);
+        } catch {
+          return [];
+        }
+      }
+      detectVmServiceUri() {
+        try {
+          const logcat = this.exec("logcat -d -s flutter", {
+            timeout: 1e4,
+            maxBuffer: 10 * 1024 * 1024
+          });
+          const matches = logcat.match(/http:\/\/127\.0\.0\.1:\d+\/[^/]+\//g);
+          if (!matches || matches.length === 0) return null;
+          const unique = [...new Set(matches)].reverse();
+          return unique[0].replace("http://", "ws://") + "ws";
+        } catch {
+          return null;
+        }
+      }
+      portForward(port) {
+        try {
+          this.exec(`forward tcp:${port} tcp:${port}`);
+        } catch {
+        }
+      }
+      detectDialog() {
+        try {
+          const output = this.exec("shell dumpsys window displays");
+          const focusMatch = output.match(/mCurrentFocus=Window\{[^}]*\s+(\S+)\}/);
+          const window = focusMatch?.[1] ?? "unknown";
+          const safeWindows = ["StatusBar", "NavigationBar", "InputMethod"];
+          if (safeWindows.some((w) => window.includes(w))) {
+            return { present: false, window };
+          }
+          const dialogIndicators = [
+            "com.google.android.gms",
+            "PermissionController",
+            "com.android.systemui",
+            "com.google.android.permissioncontroller",
+            "AlertDialog",
+            "Chooser"
+          ];
+          const isDialog = dialogIndicators.some((d) => window.includes(d));
+          return { present: isDialog, window };
+        } catch {
+          return { present: false, window: "error" };
+        }
+      }
+      dismissDialog() {
+        const info = this.detectDialog();
+        if (!info.present) return false;
+        this.keyevent("back");
+        return true;
+      }
+      checkToolInstalled() {
+        try {
+          execSync2("adb version", { encoding: "utf-8", timeout: 5e3, stdio: "pipe" });
+          return { ok: true, message: "ADB is installed" };
+        } catch {
+          return { ok: false, message: "ADB not found. Install Android SDK Platform Tools and add to PATH" };
+        }
+      }
+      listDevices() {
+        try {
+          const output = execSync2("adb devices", { encoding: "utf-8", timeout: 5e3, stdio: "pipe" });
+          return output.trim().split("\n").slice(1).filter((l) => l.includes("	device")).map((l) => l.split("	")[0]);
+        } catch {
+          return [];
+        }
+      }
+    };
+  }
+});
+
+// src/transport/ios-sim.ts
+import { execSync as execSync3 } from "node:child_process";
+import { readFileSync as readFileSync3, unlinkSync as unlinkSync2 } from "node:fs";
+var DEVICE_LOGICAL_SIZES, TITLEBAR_HEIGHT, IosSimTransport;
+var init_ios_sim = __esm({
+  "src/transport/ios-sim.ts"() {
+    "use strict";
+    DEVICE_LOGICAL_SIZES = {
+      "iPhone-17-Pro-Max": { width: 430, height: 932 },
+      "iPhone-16-Pro-Max": { width: 430, height: 932 },
+      "iPhone-15-Pro-Max": { width: 430, height: 932 },
+      "iPhone-17-Pro": { width: 393, height: 852 },
+      "iPhone-16-Pro": { width: 393, height: 852 },
+      "iPhone-15-Pro": { width: 393, height: 852 },
+      "iPhone-17": { width: 390, height: 844 },
+      "iPhone-16": { width: 390, height: 844 },
+      "iPhone-15": { width: 390, height: 844 },
+      "iPhone-SE": { width: 375, height: 667 },
+      "iPad-Pro-13": { width: 1024, height: 1366 },
+      "iPad-Pro-11": { width: 834, height: 1194 },
+      "iPad-Air": { width: 834, height: 1194 }
+    };
+    TITLEBAR_HEIGHT = 52;
+    IosSimTransport = class {
+      platform = "ios";
+      deviceId;
+      constructor(deviceId) {
+        this.deviceId = deviceId;
+      }
+      simctl(cmd, opts) {
+        return execSync3(`xcrun simctl ${cmd}`, {
+          encoding: "utf8",
+          timeout: opts?.timeout ?? 5e3,
+          maxBuffer: opts?.maxBuffer,
+          stdio: ["pipe", "pipe", "pipe"]
+        }).trim();
+      }
+      /** Get the Simulator.app window bounds: {x, y, width, height} in screen points */
+      getWindowBounds() {
+        try {
+          const result = execSync3(`osascript -e '
+tell application "System Events"
+    tell process "Simulator"
+        set winPos to position of window 1
+        set winSize to size of window 1
+        return (item 1 of winPos as text) & "," & (item 2 of winPos as text) & "," & (item 1 of winSize as text) & "," & (item 2 of winSize as text)
+    end tell
+end tell'`, { encoding: "utf8", timeout: 5e3, stdio: ["pipe", "pipe", "pipe"] }).trim();
+          const [x, y, width, height] = result.split(",").map(Number);
+          return { x, y, width, height };
+        } catch {
+          throw new Error("Cannot get Simulator window bounds. Is Simulator.app running?");
+        }
+      }
+      /** Get the device logical size (points) from device type identifier */
+      getDeviceLogicalSize() {
+        const deviceType = this.getDeviceType();
+        for (const [key, size] of Object.entries(DEVICE_LOGICAL_SIZES)) {
+          if (deviceType.includes(key)) return size;
+        }
+        return { width: 393, height: 852 };
+      }
+      /** Get the device type identifier for the current device */
+      getDeviceType() {
+        try {
+          const info = this.simctl("list devices -j");
+          const parsed = JSON.parse(info);
+          for (const runtime of Object.values(parsed.devices)) {
+            for (const dev of runtime) {
+              if (dev.udid === this.deviceId || this.deviceId === "booted" && dev.state === "Booted") {
+                return dev.deviceTypeIdentifier ?? "";
+              }
+            }
+          }
+        } catch {
+        }
+        return "";
+      }
+      /**
+       * Convert device physical-pixel coordinates to macOS screen points.
+       * 1. physicalPx → logicalPt (divide by density)
+       * 2. logicalPt → screenPt (scale by viewport ratio + window offset)
+       */
+      deviceToScreen(devX, devY) {
+        const density = this.getDensity();
+        const logX = devX / density;
+        const logY = devY / density;
+        const win = this.getWindowBounds();
+        const devLogical = this.getDeviceLogicalSize();
+        const vpW = win.width;
+        const vpH = win.height - TITLEBAR_HEIGHT;
+        const scaleX = vpW / devLogical.width;
+        const scaleY = vpH / devLogical.height;
+        return {
+          x: Math.round(win.x + logX * scaleX),
+          y: Math.round(win.y + TITLEBAR_HEIGHT + logY * scaleY)
+        };
+      }
+      /** Check if cliclick is available */
+      hasCliclick() {
+        try {
+          execSync3("which cliclick", { encoding: "utf8", timeout: 2e3, stdio: ["pipe", "pipe", "pipe"] });
+          return true;
+        } catch {
+          return false;
+        }
+      }
+      tap(x, y) {
+        if (this.hasCliclick()) {
+          const screen = this.deviceToScreen(x, y);
+          execSync3(`cliclick c:${screen.x},${screen.y}`, {
+            encoding: "utf8",
+            timeout: 5e3,
+            stdio: ["pipe", "pipe", "pipe"]
+          });
+          return;
+        }
+        throw new Error("Cannot tap on iOS simulator. Install cliclick: brew install cliclick");
+      }
+      swipe(x1, y1, x2, y2, durationMs) {
+        if (this.hasCliclick()) {
+          const start = this.deviceToScreen(x1, y1);
+          const end = this.deviceToScreen(x2, y2);
+          const wait = Math.max(20, Math.round(durationMs / 4));
+          execSync3(`cliclick dd:${start.x},${start.y} w:${wait} m:${end.x},${end.y} w:${wait} du:${end.x},${end.y}`, {
+            encoding: "utf8",
+            timeout: durationMs + 5e3,
+            stdio: ["pipe", "pipe", "pipe"]
+          });
+          return;
+        }
+        throw new Error("Cannot swipe on iOS simulator. Install cliclick: brew install cliclick");
+      }
+      keyevent(key) {
+        if (key === "home") {
+          execSync3(`osascript -e 'tell application "System Events" to keystroke "h" using {shift down, command down}'`, {
+            encoding: "utf8",
+            timeout: 5e3,
+            stdio: ["pipe", "pipe", "pipe"]
+          });
+        } else {
+          const screen = this.getScreenSize();
+          this.swipe(5, screen.height / 2, screen.width / 2, screen.height / 2, 300);
+        }
+      }
+      screenshot() {
+        const tmpPath = `/tmp/agent-flutter-ios-screenshot-${Date.now()}.png`;
+        this.simctl(`io ${this.deviceId} screenshot ${tmpPath}`);
+        const buf = readFileSync3(tmpPath);
+        try {
+          unlinkSync2(tmpPath);
+        } catch {
+        }
+        return buf;
+      }
+      getScreenSize() {
+        const deviceType = this.getDeviceType();
+        const sizes = [
+          [["iPhone-17-Pro-Max", "iPhone-16-Pro-Max", "iPhone-15-Pro-Max"], { width: 1290, height: 2796 }],
+          [["iPhone-17-Pro", "iPhone-16-Pro", "iPhone-15-Pro"], { width: 1179, height: 2556 }],
+          [["iPhone-17", "iPhone-16", "iPhone-15"], { width: 1170, height: 2532 }],
+          [["iPhone-SE"], { width: 750, height: 1334 }],
+          [["iPad-Pro-13"], { width: 2048, height: 2732 }],
+          [["iPad-Pro-11", "iPad-Air"], { width: 1668, height: 2388 }]
+        ];
+        for (const [keys, size] of sizes) {
+          if (keys.some((k) => deviceType.includes(k))) return size;
+        }
+        return { width: 1179, height: 2556 };
+      }
+      getDensity() {
+        const dt = this.getDeviceType();
+        if (dt.includes("iPhone-SE") || dt.includes("iPhone-8")) return 2;
+        if (dt.includes("iPad-mini") || dt.includes("iPad-Air-2")) return 2;
+        return 3;
+      }
+      dumpText() {
+        return [];
+      }
+      detectVmServiceUri() {
+        return null;
+      }
+      portForward(_port) {
+      }
+      detectDialog() {
+        try {
+          const result = execSync3(`osascript -e '
+tell application "System Events"
+    tell process "Simulator"
+        if exists sheet 1 of window 1 then
+            return "sheet"
+        end if
+        if exists (first UI element of window 1 whose role is "AXSheet") then
+            return "alert"
+        end if
+    end tell
+end tell
+return "none"'`, { encoding: "utf8", timeout: 5e3, stdio: ["pipe", "pipe", "pipe"] }).trim();
+          if (result === "sheet" || result === "alert") {
+            return { present: true, window: `iOS ${result}` };
+          }
+        } catch {
+        }
+        return { present: false, window: "n/a (iOS)" };
+      }
+      dismissDialog() {
+        try {
+          const result = execSync3(`osascript -e '
+tell application "System Events"
+    tell process "Simulator"
+        tell window 1
+            -- Try to find and click "Allow" or "OK" buttons in alerts
+            set foundBtn to false
+            repeat with elem in (every button)
+                set btnTitle to title of elem
+                if btnTitle is "Allow" or btnTitle is "OK" or btnTitle is "Allow While Using App" or btnTitle is "Continue" then
+                    click elem
+                    set foundBtn to true
+                    exit repeat
+                end if
+            end repeat
+            return foundBtn as text
+        end tell
+    end tell
+end tell'`, { encoding: "utf8", timeout: 5e3, stdio: ["pipe", "pipe", "pipe"] }).trim();
+          return result === "true";
+        } catch {
+          return false;
+        }
+      }
+      checkToolInstalled() {
+        try {
+          execSync3("xcrun simctl help", { encoding: "utf-8", timeout: 5e3, stdio: "pipe" });
+        } catch {
+          return { ok: false, message: "xcrun simctl not found. Install Xcode and Command Line Tools" };
+        }
+        const hasCli = this.hasCliclick();
+        const msg = hasCli ? "Xcode Simulator tools + cliclick installed" : "Xcode Simulator tools installed (cliclick missing \u2014 native tap/swipe unavailable, install with: brew install cliclick)";
+        return { ok: true, message: msg };
+      }
+      listDevices() {
+        try {
+          const output = this.simctl("list devices -j");
+          const parsed = JSON.parse(output);
+          const devices = [];
+          for (const runtime of Object.values(parsed.devices)) {
+            for (const dev of runtime) {
+              if (dev.state === "Booted") {
+                devices.push(dev.udid);
+              }
+            }
+          }
+          return devices;
+        } catch {
+          return [];
+        }
+      }
+    };
+  }
+});
+
+// src/transport/index.ts
+function detectPlatform(deviceId) {
+  if (/^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i.test(deviceId)) {
+    return "ios";
+  }
+  if (deviceId === "booted") {
+    return "ios";
+  }
+  return "android";
+}
+function resolveTransport(deviceId) {
+  const device = deviceId ?? process.env.AGENT_FLUTTER_DEVICE ?? "emulator-5554";
+  const explicitPlatform = process.env.AGENT_FLUTTER_PLATFORM;
+  const platform = explicitPlatform ?? detectPlatform(device);
+  if (platform === "ios") {
+    return new IosSimTransport(device);
+  }
+  return new AdbTransport(device);
+}
+var init_transport = __esm({
+  "src/transport/index.ts"() {
+    "use strict";
+    init_adb();
+    init_ios_sim();
+  }
+});
+
 // src/commands/press.ts
 var press_exports = {};
 __export(press_exports, {
@@ -593,21 +1090,33 @@ async function pressCommand(args) {
     return;
   }
   const isDryRun = args.includes("--dry-run") || process.env.AGENT_FLUTTER_DRY_RUN === "1";
-  const positionals = args.filter((a) => a !== "--dry-run");
+  const useNative = args.includes("--native") || args.includes("--adb");
+  const positionals = args.filter((a) => a !== "--dry-run" && a !== "--native" && a !== "--adb");
   if (positionals.length < 1) {
-    throw new AgentFlutterError(ErrorCodes.INVALID_ARGS, "Usage: agent-flutter press @ref");
+    throw new AgentFlutterError(ErrorCodes.INVALID_ARGS, "Usage: agent-flutter press @ref | press <x> <y>");
   }
+  const isCoordinateMode = positionals.length >= 2 && /^\d+$/.test(positionals[0]) && /^\d+$/.test(positionals[1]);
+  if (isCoordinateMode) {
+    await pressCoordinates(positionals, isDryRun);
+  } else if (useNative) {
+    await pressNativeRef(positionals, isDryRun);
+  } else {
+    await pressMarionette(positionals, isDryRun);
+  }
+}
+async function pressMarionette(positionals, isDryRun) {
   const session = loadSession();
   if (!session) throw new AgentFlutterError(ErrorCodes.NOT_CONNECTED, "Not connected", "Run: agent-flutter connect");
   const el = resolveRef(session, positionals[0]);
   if (!el) throw new AgentFlutterError(ErrorCodes.ELEMENT_NOT_FOUND, `Ref not found: ${positionals[0]}`, "Run: agent-flutter snapshot");
-  const method = el.key ? "Key" : el.text ? "Text" : "Coordinates";
+  const resolveMethod = el.key ? "Key" : el.text ? "Text" : "Coordinates";
   if (isDryRun) {
     console.log(JSON.stringify({
       dryRun: true,
       command: "press",
       target: `@${el.ref}`,
-      resolved: { type: el.type, key: el.key ?? null, method }
+      resolved: { type: el.type, key: el.key ?? null, method: resolveMethod },
+      method: "marionette"
     }));
     return;
   }
@@ -623,10 +1132,78 @@ async function pressCommand(args) {
       const cy = el.bounds.y + el.bounds.height / 2;
       await client.tap({ type: "Coordinates", x: cx, y: cy });
     }
-    console.log(`Pressed @${el.ref}`);
+    console.log(JSON.stringify({
+      pressed: `@${el.ref}`,
+      method: "marionette"
+    }));
   } finally {
     await client.disconnect();
   }
+}
+async function pressCoordinates(positionals, isDryRun) {
+  const x = parseInt(positionals[0], 10);
+  const y = parseInt(positionals[1], 10);
+  if (isNaN(x) || isNaN(y)) {
+    throw new AgentFlutterError(ErrorCodes.INVALID_ARGS, `Invalid coordinates: ${positionals[0]} ${positionals[1]}`);
+  }
+  const transport = resolveTransport();
+  if (isDryRun) {
+    console.log(JSON.stringify({
+      dryRun: true,
+      command: "press",
+      tapped: { x, y },
+      method: "coordinates",
+      platform: transport.platform
+    }));
+    return;
+  }
+  try {
+    transport.tap(x, y);
+  } catch {
+    throw new AgentFlutterError(ErrorCodes.COMMAND_FAILED, `Failed to tap at ${x},${y}`, "Check device connection");
+  }
+  console.log(JSON.stringify({
+    pressed: { x, y },
+    method: "coordinates",
+    platform: transport.platform
+  }));
+}
+async function pressNativeRef(positionals, isDryRun) {
+  const session = loadSession();
+  if (!session) throw new AgentFlutterError(ErrorCodes.NOT_CONNECTED, "Not connected", "Run: agent-flutter connect");
+  const el = resolveRef(session, positionals[0]);
+  if (!el) throw new AgentFlutterError(ErrorCodes.ELEMENT_NOT_FOUND, `Ref not found: ${positionals[0]}`, "Run: agent-flutter snapshot");
+  if (!el.bounds) {
+    throw new AgentFlutterError(ErrorCodes.COMMAND_FAILED, `No bounds for ${positionals[0]}`, "Element must have bounds for native tap");
+  }
+  const transport = resolveTransport();
+  const logicalX = el.bounds.x + el.bounds.width / 2;
+  const logicalY = el.bounds.y + el.bounds.height / 2;
+  const density = transport.getDensity();
+  const x = Math.round(logicalX * density);
+  const y = Math.round(logicalY * density);
+  if (isDryRun) {
+    console.log(JSON.stringify({
+      dryRun: true,
+      command: "press",
+      target: `@${el.ref}`,
+      tapped: { x, y },
+      method: "native-ref",
+      platform: transport.platform
+    }));
+    return;
+  }
+  try {
+    transport.tap(x, y);
+  } catch {
+    throw new AgentFlutterError(ErrorCodes.COMMAND_FAILED, `Failed to tap at ${x},${y}`, "Check device connection");
+  }
+  console.log(JSON.stringify({
+    pressed: `@${el.ref}`,
+    tapped: { x, y },
+    method: "native-ref",
+    platform: transport.platform
+  }));
 }
 var HELP2;
 var init_press = __esm({
@@ -634,11 +1211,17 @@ var init_press = __esm({
     "use strict";
     init_vm_client();
     init_session();
+    init_transport();
     init_errors();
     HELP2 = `Usage: agent-flutter press @ref
+       agent-flutter press <x> <y>
+       agent-flutter press @ref --native
 
-  Tap element by ref.
-  @ref  Element reference from snapshot (e.g. @e3)
+  Tap element by ref (Marionette), coordinates, or ref via native input.
+
+  @ref       Element reference from snapshot (e.g. @e3) \u2014 uses Marionette
+  <x> <y>    Physical pixel coordinates \u2014 uses platform input (ADB/simctl)
+  --native   Force native tap instead of Marionette (useful when refs are stale)
 
 Options:
   --dry-run  Resolve target without executing`;
@@ -1118,7 +1701,6 @@ var scroll_exports = {};
 __export(scroll_exports, {
   scrollCommand: () => scrollCommand
 });
-import { execSync as execSync2 } from "node:child_process";
 async function scrollCommand(args) {
   if (args.includes("--help") || args.includes("-h")) {
     console.log(HELP8);
@@ -1130,19 +1712,47 @@ async function scrollCommand(args) {
     throw new AgentFlutterError(ErrorCodes.INVALID_ARGS, "Usage: agent-flutter scroll <@ref|up|down|left|right>");
   }
   const target = positionals[0];
-  const deviceId = process.env.AGENT_FLUTTER_DEVICE ?? "emulator-5554";
-  if (SWIPE_COORDS[target]) {
+  if (DIRECTIONS.includes(target)) {
+    const transport = resolveTransport();
     if (isDryRun) {
-      console.log(JSON.stringify({ dryRun: true, command: "scroll", direction: target, device: deviceId }));
+      console.log(JSON.stringify({ dryRun: true, command: "scroll", direction: target, device: transport.deviceId, platform: transport.platform }));
       return;
     }
     const amount = positionals[1] ? parseFloat(positionals[1]) : 1;
-    const [x1, y1, x2, y2] = SWIPE_COORDS[target];
-    const dx = (x2 - x1) * amount;
-    const dy = (y2 - y1) * amount;
-    execSync2(`adb -s ${deviceId} shell input swipe ${x1} ${y1} ${Math.round(x1 + dx)} ${Math.round(y1 + dy)} 300`, {
-      timeout: 5e3
-    });
+    const screen = transport.getScreenSize();
+    const cx = screen.width / 2;
+    let x1, y1, x2, y2;
+    const scrollDist = screen.height * 0.5 * amount;
+    const hScrollDist = screen.width * 0.7 * amount;
+    switch (target) {
+      case "down":
+        x1 = cx;
+        y1 = Math.round(screen.height * 0.75);
+        x2 = cx;
+        y2 = Math.round(screen.height * 0.75 - scrollDist);
+        break;
+      case "up":
+        x1 = cx;
+        y1 = Math.round(screen.height * 0.25);
+        x2 = cx;
+        y2 = Math.round(screen.height * 0.25 + scrollDist);
+        break;
+      case "left":
+        x1 = Math.round(screen.width * 0.8);
+        y1 = Math.round(screen.height / 2);
+        x2 = Math.round(screen.width * 0.8 - hScrollDist);
+        y2 = Math.round(screen.height / 2);
+        break;
+      case "right":
+        x1 = Math.round(screen.width * 0.2);
+        y1 = Math.round(screen.height / 2);
+        x2 = Math.round(screen.width * 0.2 + hScrollDist);
+        y2 = Math.round(screen.height / 2);
+        break;
+      default:
+        throw new AgentFlutterError(ErrorCodes.INVALID_ARGS, `Unknown direction: ${target}`);
+    }
+    transport.swipe(x1, y1, x2, y2, 300);
     console.log(`Scrolled ${target}`);
     return;
   }
@@ -1176,29 +1786,25 @@ async function scrollCommand(args) {
     await client.disconnect();
   }
 }
-var HELP8, SWIPE_COORDS;
+var HELP8, DIRECTIONS;
 var init_scroll = __esm({
   "src/commands/scroll.ts"() {
     "use strict";
     init_vm_client();
     init_session();
+    init_transport();
     init_errors();
     HELP8 = `Usage: agent-flutter scroll <target>
 
   scroll @ref              Scroll element into view via Marionette
-  scroll down [amount]     Scroll down via ADB (amount: multiplier, default 1)
-  scroll up [amount]       Scroll up via ADB
-  scroll left [amount]     Scroll left via ADB
-  scroll right [amount]    Scroll right via ADB
+  scroll down [amount]     Scroll down (amount: multiplier, default 1)
+  scroll up [amount]       Scroll up
+  scroll left [amount]     Scroll left
+  scroll right [amount]    Scroll right
 
 Options:
   --dry-run  Show intended action without executing`;
-    SWIPE_COORDS = {
-      down: [540, 1500, 540, 500],
-      up: [540, 500, 540, 1500],
-      left: [900, 960, 100, 960],
-      right: [100, 960, 900, 960]
-    };
+    DIRECTIONS = ["down", "up", "left", "right"];
   }
 });
 
@@ -1207,7 +1813,6 @@ var swipe_exports = {};
 __export(swipe_exports, {
   swipeCommand: () => swipeCommand
 });
-import { execSync as execSync3 } from "node:child_process";
 async function swipeCommand(args) {
   if (args.includes("--help") || args.includes("-h")) {
     console.log(HELP9);
@@ -1236,52 +1841,54 @@ async function swipeCommand(args) {
     throw new AgentFlutterError(ErrorCodes.INVALID_ARGS, "Usage: agent-flutter swipe <up|down|left|right>");
   }
   const direction = positionals[0];
-  const deviceId = process.env.AGENT_FLUTTER_DEVICE ?? "emulator-5554";
   if (!["up", "down", "left", "right"].includes(direction)) {
     throw new AgentFlutterError(ErrorCodes.INVALID_ARGS, `Unknown direction: ${direction}. Use: up, down, left, right`);
   }
+  const transport = resolveTransport();
   if (isDryRun) {
-    console.log(JSON.stringify({ dryRun: true, command: "swipe", direction, distance, duration, device: deviceId }));
+    console.log(JSON.stringify({ dryRun: true, command: "swipe", direction, distance, duration, device: transport.deviceId, platform: transport.platform }));
     return;
   }
+  const screen = transport.getScreenSize();
+  const cx = screen.width / 2;
+  const cy = screen.height / 2;
   let x1, y1, x2, y2;
   switch (direction) {
     case "up":
-      x1 = CX;
-      y1 = CY + SCREEN_H * distance / 2;
-      x2 = CX;
-      y2 = CY - SCREEN_H * distance / 2;
+      x1 = cx;
+      y1 = cy + screen.height * distance / 2;
+      x2 = cx;
+      y2 = cy - screen.height * distance / 2;
       break;
     case "down":
-      x1 = CX;
-      y1 = CY - SCREEN_H * distance / 2;
-      x2 = CX;
-      y2 = CY + SCREEN_H * distance / 2;
+      x1 = cx;
+      y1 = cy - screen.height * distance / 2;
+      x2 = cx;
+      y2 = cy + screen.height * distance / 2;
       break;
     case "left":
-      x1 = CX + SCREEN_W * distance / 2;
-      y1 = CY;
-      x2 = CX - SCREEN_W * distance / 2;
-      y2 = CY;
+      x1 = cx + screen.width * distance / 2;
+      y1 = cy;
+      x2 = cx - screen.width * distance / 2;
+      y2 = cy;
       break;
     case "right":
-      x1 = CX - SCREEN_W * distance / 2;
-      y1 = CY;
-      x2 = CX + SCREEN_W * distance / 2;
-      y2 = CY;
+      x1 = cx - screen.width * distance / 2;
+      y1 = cy;
+      x2 = cx + screen.width * distance / 2;
+      y2 = cy;
       break;
     default:
       throw new AgentFlutterError(ErrorCodes.INVALID_ARGS, `Unknown direction: ${direction}`);
   }
-  execSync3(`adb -s ${deviceId} shell input swipe ${Math.round(x1)} ${Math.round(y1)} ${Math.round(x2)} ${Math.round(y2)} ${duration}`, {
-    timeout: 5e3
-  });
+  transport.swipe(x1, y1, x2, y2, duration);
   console.log(`Swiped ${direction}`);
 }
-var HELP9, CX, CY, SCREEN_W, SCREEN_H;
+var HELP9;
 var init_swipe = __esm({
   "src/commands/swipe.ts"() {
     "use strict";
+    init_transport();
     init_errors();
     HELP9 = `Usage: agent-flutter swipe <direction> [options]
 
@@ -1291,10 +1898,6 @@ Options:
   --distance N      Fraction of screen to swipe (default: 0.5)
   --duration-ms N   Swipe duration in ms (default: 300)
   --dry-run         Show intended action without executing`;
-    CX = 540;
-    CY = 960;
-    SCREEN_W = 1080;
-    SCREEN_H = 1920;
   }
 });
 
@@ -1303,20 +1906,20 @@ var back_exports = {};
 __export(back_exports, {
   backCommand: () => backCommand
 });
-import { execSync as execSync4 } from "node:child_process";
 async function backCommand(args) {
   const isDryRun = args?.includes("--dry-run") || process.env.AGENT_FLUTTER_DRY_RUN === "1";
-  const deviceId = process.env.AGENT_FLUTTER_DEVICE ?? "emulator-5554";
+  const transport = resolveTransport();
   if (isDryRun) {
-    console.log(JSON.stringify({ dryRun: true, command: "back", device: deviceId }));
+    console.log(JSON.stringify({ dryRun: true, command: "back", device: transport.deviceId, platform: transport.platform }));
     return;
   }
-  execSync4(`adb -s ${deviceId} shell input keyevent 4`, { timeout: 5e3 });
+  transport.keyevent("back");
   console.log("Back");
 }
 var init_back = __esm({
   "src/commands/back.ts"() {
     "use strict";
+    init_transport();
   }
 });
 
@@ -1325,20 +1928,20 @@ var home_exports = {};
 __export(home_exports, {
   homeCommand: () => homeCommand
 });
-import { execSync as execSync5 } from "node:child_process";
 async function homeCommand(args) {
   const isDryRun = args?.includes("--dry-run") || process.env.AGENT_FLUTTER_DRY_RUN === "1";
-  const deviceId = process.env.AGENT_FLUTTER_DEVICE ?? "emulator-5554";
+  const transport = resolveTransport();
   if (isDryRun) {
-    console.log(JSON.stringify({ dryRun: true, command: "home", device: deviceId }));
+    console.log(JSON.stringify({ dryRun: true, command: "home", device: transport.deviceId, platform: transport.platform }));
     return;
   }
-  execSync5(`adb -s ${deviceId} shell input keyevent 3`, { timeout: 5e3 });
+  transport.keyevent("home");
   console.log("Home");
 }
 var init_home = __esm({
   "src/commands/home.ts"() {
     "use strict";
+    init_transport();
   }
 });
 
@@ -1348,7 +1951,6 @@ __export(screenshot_exports, {
   screenshotCommand: () => screenshotCommand
 });
 import { writeFileSync as writeFileSync2 } from "node:fs";
-import { execSync as execSync6 } from "node:child_process";
 async function screenshotCommand(args) {
   if (args.includes("--help") || args.includes("-h")) {
     console.log(HELP10);
@@ -1356,30 +1958,31 @@ async function screenshotCommand(args) {
   }
   const outPath = args[0] ?? "screenshot.png";
   const session = loadSession();
-  if (!session) throw new AgentFlutterError(ErrorCodes.NOT_CONNECTED, "Not connected", "Run: agent-flutter connect");
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
-  try {
-    const buf = await client.takeScreenshot();
-    if (buf) {
-      writeFileSync2(outPath, buf);
-      console.log(`Screenshot saved: ${outPath}`);
-      return;
+  if (session) {
+    const client = new VmServiceClient();
+    try {
+      await client.connect(session.vmServiceUri);
+      const buf = await client.takeScreenshot();
+      if (buf) {
+        writeFileSync2(outPath, buf);
+        console.log(`Screenshot saved: ${outPath}`);
+        return;
+      }
+    } catch {
+    } finally {
+      try {
+        await client.disconnect();
+      } catch {
+      }
     }
-  } catch {
-  } finally {
-    await client.disconnect();
   }
-  const deviceId = process.env.AGENT_FLUTTER_DEVICE ?? "emulator-5554";
+  const transport = resolveTransport();
   try {
-    const raw = execSync6(`adb -s ${deviceId} shell screencap -p`, {
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: 1e4
-    });
+    const raw = transport.screenshot();
     writeFileSync2(outPath, raw);
-    console.log(`Screenshot saved (via ADB): ${outPath}`);
+    console.log(`Screenshot saved (via ${transport.platform}): ${outPath}`);
   } catch {
-    throw new AgentFlutterError(ErrorCodes.COMMAND_FAILED, "Failed to capture screenshot via both Marionette and ADB");
+    throw new AgentFlutterError(ErrorCodes.COMMAND_FAILED, "Failed to capture screenshot via both Marionette and platform tools");
   }
 }
 var HELP10;
@@ -1388,11 +1991,12 @@ var init_screenshot = __esm({
     "use strict";
     init_vm_client();
     init_session();
+    init_transport();
     init_errors();
     HELP10 = `Usage: agent-flutter screenshot [path]
 
   Capture screenshot. Default: screenshot.png
-  Uses Marionette first, falls back to ADB screencap.`;
+  Uses Marionette first, falls back to platform screencap.`;
   }
 });
 
@@ -1473,19 +2077,19 @@ var dismiss_exports = {};
 __export(dismiss_exports, {
   dismissCommand: () => dismissCommand
 });
-import { execSync as execSync7 } from "node:child_process";
 async function dismissCommand(args) {
   if (args.includes("--help") || args.includes("-h")) {
     console.log(HELP13);
     return;
   }
   const checkOnly = args.includes("--check");
-  const device = process.env.AGENT_FLUTTER_DEVICE ?? "emulator-5554";
-  const dialogInfo = detectDialog(device);
+  const transport = resolveTransport();
+  const dialogInfo = transport.detectDialog();
   if (checkOnly) {
     console.log(JSON.stringify({
       dialogPresent: dialogInfo.present,
-      window: dialogInfo.window
+      window: dialogInfo.window,
+      platform: transport.platform
     }));
     if (!dialogInfo.present) {
       process.exitCode = 1;
@@ -1495,177 +2099,113 @@ async function dismissCommand(args) {
   if (!dialogInfo.present) {
     console.log(JSON.stringify({
       dismissed: false,
-      reason: "no dialog detected",
-      window: dialogInfo.window
+      reason: transport.platform === "ios" ? "not supported on iOS" : "no dialog detected",
+      window: dialogInfo.window,
+      platform: transport.platform
     }));
     return;
   }
-  try {
-    adb(device, "shell input keyevent 4");
+  const dismissed = transport.dismissDialog();
+  if (dismissed) {
     console.log(JSON.stringify({
       dismissed: true,
-      window: dialogInfo.window
+      window: dialogInfo.window,
+      platform: transport.platform
     }));
-  } catch {
+  } else {
     throw new AgentFlutterError(
       ErrorCodes.COMMAND_FAILED,
       "Failed to dismiss dialog",
-      "Check ADB connection"
+      "Check device connection"
     );
   }
-}
-function detectDialog(device) {
-  try {
-    const output = adb(device, "shell dumpsys window displays");
-    const focusMatch = output.match(/mCurrentFocus=Window\{[^}]*\s+(\S+)\}/);
-    const window = focusMatch?.[1] ?? "unknown";
-    const safeWindows = ["StatusBar", "NavigationBar", "InputMethod"];
-    if (safeWindows.some((w) => window.includes(w))) {
-      return { present: false, window };
-    }
-    const dialogIndicators = [
-      "com.google.android.gms",
-      "PermissionController",
-      "com.android.systemui",
-      "com.google.android.permissioncontroller",
-      "AlertDialog",
-      "Chooser"
-    ];
-    const isDialog = dialogIndicators.some((d) => window.includes(d));
-    return { present: isDialog, window };
-  } catch {
-    return { present: false, window: "error" };
-  }
-}
-function adb(device, cmd) {
-  return execSync7(`adb -s ${device} ${cmd}`, {
-    encoding: "utf8",
-    timeout: 5e3
-  }).trim();
 }
 var HELP13;
 var init_dismiss = __esm({
   "src/commands/dismiss.ts"() {
     "use strict";
+    init_transport();
     init_errors();
     HELP13 = `Usage: agent-flutter dismiss [--check]
 
-  Dismiss the topmost Android system dialog via ADB.
-  Detects if a non-app window is focused (system dialog, permissions, etc.)
-  and sends BACK to dismiss it.
+  Dismiss the topmost system dialog.
+  On Android: detects non-app window and sends BACK.
+  On iOS: not applicable (iOS handles dialogs differently).
 
 Options:
   --check  Check if a dialog is present without dismissing (exit 0=yes, 1=no)`;
   }
 });
 
-// src/commands/tap.ts
-var tap_exports = {};
-__export(tap_exports, {
-  tapCommand: () => tapCommand
+// src/commands/text.ts
+var text_exports = {};
+__export(text_exports, {
+  textCommand: () => textCommand
 });
-import { execSync as execSync8 } from "node:child_process";
-async function tapCommand(args) {
+async function textCommand(args) {
   if (args.includes("--help") || args.includes("-h")) {
     console.log(HELP14);
     return;
   }
-  const isDryRun = args.includes("--dry-run") || process.env.AGENT_FLUTTER_DRY_RUN === "1";
-  const positionals = args.filter((a) => a !== "--dry-run");
-  if (positionals.length < 1) {
-    throw new AgentFlutterError(ErrorCodes.INVALID_ARGS, "Usage: agent-flutter tap <x> <y> | tap @ref");
-  }
-  const device = process.env.AGENT_FLUTTER_DEVICE ?? "emulator-5554";
-  let x;
-  let y;
-  let method;
-  const refPattern = /^@?e\d+$/;
-  if (refPattern.test(positionals[0])) {
-    const session = loadSession();
-    if (!session) {
-      throw new AgentFlutterError(ErrorCodes.NOT_CONNECTED, "Not connected", "Run: agent-flutter connect");
+  const isJson = args.includes("--json") || process.env.AGENT_FLUTTER_JSON === "1";
+  const isAll = args.includes("--all");
+  const query = args.filter((a) => !a.startsWith("--")).join(" ").trim() || null;
+  const transport = resolveTransport();
+  if (transport.platform === "ios") {
+    if (isJson) {
+      console.log(JSON.stringify(query ? { found: false, matches: [] } : []));
+    } else {
+      console.log("(text extraction not available on iOS \u2014 UIAutomator is Android-only)");
     }
-    const el = resolveRef(session, positionals[0]);
-    if (!el) {
-      throw new AgentFlutterError(ErrorCodes.ELEMENT_NOT_FOUND, `Ref not found: ${positionals[0]}`, "Run: agent-flutter snapshot");
-    }
-    if (!el.bounds) {
-      throw new AgentFlutterError(ErrorCodes.COMMAND_FAILED, `No bounds for ${positionals[0]}`, "Element must have bounds for tap");
-    }
-    const logicalX = el.bounds.x + el.bounds.width / 2;
-    const logicalY = el.bounds.y + el.bounds.height / 2;
-    const density = getDeviceDensity(device);
-    x = Math.round(logicalX * density);
-    y = Math.round(logicalY * density);
-    method = "ref";
-  } else {
-    if (positionals.length < 2) {
-      throw new AgentFlutterError(ErrorCodes.INVALID_ARGS, "Usage: agent-flutter tap <x> <y>");
-    }
-    x = parseInt(positionals[0], 10);
-    y = parseInt(positionals[1], 10);
-    if (isNaN(x) || isNaN(y)) {
-      throw new AgentFlutterError(ErrorCodes.INVALID_ARGS, `Invalid coordinates: ${positionals[0]} ${positionals[1]}`);
-    }
-    method = "coordinates";
-  }
-  if (isDryRun) {
-    console.log(JSON.stringify({
-      dryRun: true,
-      command: "tap",
-      tapped: { x, y },
-      method
-    }));
+    if (query) process.exit(1);
     return;
   }
-  try {
-    execSync8(`adb -s ${device} shell input tap ${x} ${y}`, {
-      encoding: "utf8",
-      timeout: 5e3
-    });
-    console.log(JSON.stringify({
-      tapped: { x, y },
-      method
-    }));
-  } catch {
-    throw new AgentFlutterError(
-      ErrorCodes.COMMAND_FAILED,
-      `Failed to tap at ${x},${y}`,
-      "Check ADB connection"
-    );
-  }
-}
-function getDeviceDensity(device) {
-  try {
-    const output = execSync8(`adb -s ${device} shell wm density`, {
-      encoding: "utf8",
-      timeout: 5e3
-    }).trim();
-    const match = output.match(/density:\s*(\d+)/);
-    if (match) {
-      return parseInt(match[1], 10) / 160;
+  const entries = transport.dumpText();
+  if (query) {
+    const texts = extractVisibleTexts(entries);
+    const lowerQuery = query.toLowerCase();
+    const matches = texts.filter((t) => t.toLowerCase().includes(lowerQuery));
+    const found = matches.length > 0;
+    if (isJson) {
+      console.log(JSON.stringify({ found, matches }));
+    } else {
+      if (found) {
+        console.log(`Found: ${matches.join(", ")}`);
+      } else {
+        console.log(`Not found: "${query}"`);
+      }
     }
-  } catch {
+    if (!found) process.exit(1);
+    return;
   }
-  return 2.625;
+  if (isJson) {
+    if (isAll) {
+      console.log(JSON.stringify(entries));
+    } else {
+      const texts = extractVisibleTexts(entries);
+      console.log(JSON.stringify(texts));
+    }
+  } else {
+    const texts = extractVisibleTexts(entries);
+    for (const t of texts) {
+      console.log(t);
+    }
+  }
 }
 var HELP14;
-var init_tap = __esm({
-  "src/commands/tap.ts"() {
+var init_text = __esm({
+  "src/commands/text.ts"() {
     "use strict";
-    init_session();
-    init_errors();
-    HELP14 = `Usage: agent-flutter tap <x> <y>
-       agent-flutter tap @ref
+    init_transport();
+    init_text_parser();
+    HELP14 = `Usage: agent-flutter text [query] [options]
 
-  Tap at absolute screen coordinates via ADB.
-  Bypasses Marionette \u2014 works even when snapshot refs are stale.
+  List all visible text on screen (via Android UIAutomator).
+  With query: check if text is visible (exit 0=found, 1=not found).
 
-  <x> <y>  Physical pixel coordinates
-  @ref     Element reference \u2014 taps at center of bounds
-
-Options:
-  --dry-run  Show coordinates without tapping`;
+  Options:
+    --json    JSON output
+    --all     Include source/class/bounds metadata (with --json)`;
   }
 });
 
@@ -1674,63 +2214,52 @@ var doctor_exports = {};
 __export(doctor_exports, {
   doctorCommand: () => doctorCommand
 });
-import { execSync as execSync9 } from "node:child_process";
 async function doctorCommand(args) {
   const isJson = process.env.AGENT_FLUTTER_JSON === "1";
-  const deviceId = process.env.AGENT_FLUTTER_DEVICE ?? "emulator-5554";
+  const transport = resolveTransport();
   const checks = [];
-  try {
-    execSync9("adb version", { encoding: "utf-8", timeout: 5e3, stdio: "pipe" });
-    checks.push({ name: "adb", status: "pass", message: "ADB is installed" });
-  } catch {
-    checks.push({
-      name: "adb",
-      status: "fail",
-      message: "ADB not found",
-      fix: "Install Android SDK Platform Tools and add to PATH"
-    });
+  checks.push({ name: "platform", status: "pass", message: `${transport.platform} (device: ${transport.deviceId})` });
+  const toolCheck = transport.checkToolInstalled();
+  if (toolCheck.ok) {
+    checks.push({ name: "tool", status: "pass", message: toolCheck.message });
+  } else {
+    checks.push({ name: "tool", status: "fail", message: toolCheck.message });
   }
-  if (checks[0].status === "pass") {
-    try {
-      const devices = execSync9("adb devices", { encoding: "utf-8", timeout: 5e3, stdio: "pipe" });
-      const lines = devices.trim().split("\n").slice(1).filter((l) => l.includes("	device"));
-      if (lines.length === 0) {
+  if (toolCheck.ok) {
+    const devices = transport.listDevices();
+    if (devices.length === 0) {
+      const fix = transport.platform === "android" ? "Connect a device via USB or start an emulator: emulator -avd <name>" : "Boot a simulator: xcrun simctl boot <device>";
+      checks.push({ name: "device", status: "fail", message: "No devices connected", fix });
+    } else {
+      const targetFound = devices.includes(transport.deviceId) || transport.deviceId === "booted";
+      if (targetFound) {
+        checks.push({ name: "device", status: "pass", message: `Device ${transport.deviceId} connected` });
+      } else {
+        const available = devices.join(", ");
         checks.push({
           name: "device",
-          status: "fail",
-          message: "No ADB devices connected",
-          fix: "Connect a device via USB or start an emulator: emulator -avd <name>"
+          status: "warn",
+          message: `Target device ${transport.deviceId} not found. Available: ${available}`,
+          fix: `Use --device <id> or set AGENT_FLUTTER_DEVICE=${devices[0]}`
         });
-      } else {
-        const targetFound = lines.some((l) => l.startsWith(deviceId));
-        if (targetFound) {
-          checks.push({ name: "device", status: "pass", message: `Device ${deviceId} connected` });
-        } else {
-          const available = lines.map((l) => l.split("	")[0]).join(", ");
-          checks.push({
-            name: "device",
-            status: "warn",
-            message: `Target device ${deviceId} not found. Available: ${available}`,
-            fix: `Use --device <id> or set AGENT_FLUTTER_DEVICE=${lines[0].split("	")[0]}`
-          });
-        }
       }
-    } catch {
-      checks.push({ name: "device", status: "fail", message: "Failed to list ADB devices" });
     }
   } else {
-    checks.push({ name: "device", status: "fail", message: "Skipped (ADB not available)" });
+    checks.push({ name: "device", status: "fail", message: "Skipped (platform tool not available)" });
   }
   let vmUri = null;
-  if (checks[0].status === "pass") {
-    vmUri = detectVmServiceUri(deviceId);
+  if (toolCheck.ok) {
+    vmUri = transport.detectVmServiceUri();
+    if (!vmUri && transport.platform === "android") {
+      vmUri = detectVmServiceUri(transport.deviceId);
+    }
     if (vmUri) {
       checks.push({ name: "flutter_app", status: "pass", message: `VM Service found: ${vmUri}` });
     } else {
       checks.push({
         name: "flutter_app",
         status: "fail",
-        message: "No Flutter VM Service URI found in logcat",
+        message: "No Flutter VM Service URI found",
         fix: "Launch app with: flutter run (not adb install). The app must be running in debug or profile mode."
       });
     }
@@ -1768,7 +2297,7 @@ async function doctorCommand(args) {
           name: "marionette",
           status: "fail",
           message: `Connection failed: ${msg}`,
-          fix: "Check that the VM Service port is forwarded: adb forward tcp:<port> tcp:<port>"
+          fix: transport.platform === "android" ? "Check that the VM Service port is forwarded: adb forward tcp:<port> tcp:<port>" : "Check that the VM Service is accessible on localhost"
         });
       }
     }
@@ -1805,6 +2334,7 @@ async function doctorCommand(args) {
 var init_doctor = __esm({
   "src/commands/doctor.ts"() {
     "use strict";
+    init_transport();
     init_auto_detect();
     init_session();
     init_vm_client();
@@ -2002,11 +2532,17 @@ var COMMAND_SCHEMAS = [
   },
   {
     name: "press",
-    description: "Tap element by ref",
-    args: [{ name: "ref", required: true, description: "Element reference (e.g. @e3)" }],
-    flags: [{ name: "--dry-run", description: "Resolve target without executing" }],
+    description: "Tap element by ref or coordinates",
+    args: [
+      { name: "target", required: true, description: "@ref (e.g. @e3) or x y coordinates (physical pixels)" },
+      { name: "y", required: false, description: "Y coordinate (required when target is x coordinate)" }
+    ],
+    flags: [
+      { name: "--native", description: "Force native tap instead of Marionette (for ref targets)" },
+      { name: "--dry-run", description: "Resolve target without executing" }
+    ],
     exitCodes: { "0": "success", "2": "error" },
-    examples: ["agent-flutter press @e3"]
+    examples: ["agent-flutter press @e3", "agent-flutter press 540 1200", "agent-flutter press @e3 --native"]
   },
   {
     name: "fill",
@@ -2078,7 +2614,7 @@ var COMMAND_SCHEMAS = [
   },
   {
     name: "swipe",
-    description: "Swipe gesture via ADB",
+    description: "Swipe gesture",
     args: [{ name: "direction", required: true, description: "Direction: up, down, left, right" }],
     flags: [
       { name: "--distance N", description: "Fraction of screen to swipe", default: "0.5" },
@@ -2090,7 +2626,7 @@ var COMMAND_SCHEMAS = [
   },
   {
     name: "back",
-    description: "Android back button via ADB",
+    description: "Navigate back",
     args: [],
     flags: [{ name: "--dry-run", description: "Show intended action without executing" }],
     exitCodes: { "0": "success", "2": "error" },
@@ -2098,7 +2634,7 @@ var COMMAND_SCHEMAS = [
   },
   {
     name: "home",
-    description: "Android home button via ADB",
+    description: "Home button",
     args: [],
     flags: [{ name: "--dry-run", description: "Show intended action without executing" }],
     exitCodes: { "0": "success", "2": "error" },
@@ -2129,21 +2665,8 @@ var COMMAND_SCHEMAS = [
     examples: ["agent-flutter logs"]
   },
   {
-    name: "tap",
-    description: "Tap at coordinates via ADB (bypasses Marionette)",
-    args: [
-      { name: "x", required: true, description: "X coordinate (physical pixels) or @ref" },
-      { name: "y", required: false, description: "Y coordinate (physical pixels, required if x is not a ref)" }
-    ],
-    flags: [
-      { name: "--dry-run", description: "Show coordinates without tapping" }
-    ],
-    exitCodes: { "0": "success", "2": "error" },
-    examples: ["agent-flutter tap 200 400", "agent-flutter tap @e3"]
-  },
-  {
     name: "dismiss",
-    description: "Dismiss Android system dialog via ADB",
+    description: "Dismiss system dialog",
     args: [],
     flags: [
       { name: "--check", description: "Check if dialog is present without dismissing (exit 0=yes, 1=no)" }
@@ -2153,11 +2676,28 @@ var COMMAND_SCHEMAS = [
   },
   {
     name: "doctor",
-    description: "Check prerequisites: ADB, device, Flutter app, Marionette, session",
+    description: "Check prerequisites: platform tools, device, Flutter app, Marionette, session",
     args: [],
     flags: [],
     exitCodes: { "0": "all checks pass", "2": "one or more checks failed" },
     examples: ["agent-flutter doctor", "agent-flutter --json doctor"]
+  },
+  {
+    name: "text",
+    description: "Extract visible text from Android accessibility layer (UIAutomator)",
+    args: [{ name: "query", required: false, description: "Text to search for (substring, case-insensitive)" }],
+    flags: [
+      { name: "--json", description: "JSON output" },
+      { name: "--all", description: "Include source, class, bounds metadata (with --json)" }
+    ],
+    exitCodes: { "0": "success (or text found)", "1": "text not found (search mode)", "2": "error" },
+    examples: [
+      "agent-flutter text",
+      "agent-flutter text --json",
+      'agent-flutter text "Featured"',
+      'agent-flutter text "Sign In" --json',
+      "agent-flutter text --json --all"
+    ]
   },
   {
     name: "schema",
@@ -2236,7 +2776,8 @@ Commands:
   disconnect               Disconnect from Flutter app
   status                   Show connection state
   snapshot [-i] [-c] [-d N] [--json] [--diff]  Widget tree with @refs
-  press @ref               Tap element by ref
+  press @ref [--native]    Tap element by ref (or via native input with --native)
+  press <x> <y>            Tap at coordinates via native input
   fill @ref "text"         Enter text by ref
   get text|type|key @ref   Read element property
   find <locator> <value> [action] [arg]   Find + optional action
@@ -2244,32 +2785,36 @@ Commands:
   wait <ms>                Simple delay
   is exists|visible @ref   Assert element state (exit 0=true, 1=false)
   scroll @ref|up|down      Scroll element or page
-  swipe up|down|left|right Swipe gesture via ADB
-  back                     Android back button
-  home                     Android home button
+  swipe up|down|left|right Swipe gesture
+  back                     Navigate back
+  home                     Home button
   screenshot [path]        Capture screenshot
   reload                   Hot reload the Flutter app
   logs                     Get Flutter app logs
-  tap <x> <y> | @ref       Tap at coordinates via ADB (bypasses Marionette)
-  dismiss [--check]        Dismiss Android system dialog via ADB
+  dismiss [--check]        Dismiss system dialog
+  text [query] [--all]     Visible text from accessibility layer (exit 0=found, 1=not found)
   schema [cmd]             Show command schema (JSON)
   doctor                   Check prerequisites and diagnose issues
   diff snapshot            Show changes since last snapshot
 
 Global flags:
-  --device <id>            ADB device ID (default: emulator-5554)
+  --device <id>            Device ID (default: emulator-5554 on Android, booted on iOS)
+  --platform <os>          Force platform: android or ios (auto-detected from device ID)
   --json                   Machine-readable JSON output on all commands
   --no-json                Force human-readable output (overrides env/TTY)
   --dry-run                Resolve targets without executing (mutating commands)
   --help                   Show this help
 `;
 function parseGlobalFlags(args) {
-  const flags = { deviceId: "", json: false, noJson: false, dryRun: false };
+  const flags = { deviceId: "", platform: "", json: false, noJson: false, dryRun: false };
   const rest = [];
   let i = 0;
   while (i < args.length) {
     if ((args[i] === "--device" || args[i] === "--serial") && i + 1 < args.length) {
       flags.deviceId = args[i + 1];
+      i += 2;
+    } else if (args[i] === "--platform" && i + 1 < args.length) {
+      flags.platform = args[i + 1];
       i += 2;
     } else if (args[i] === "--json") {
       flags.json = true;
@@ -2303,7 +2848,7 @@ function validateInputs(command, cmdArgs) {
   const deviceId = process.env.AGENT_FLUTTER_DEVICE;
   if (deviceId) validateDeviceId(deviceId);
   if (command === "press") {
-    if (cmdArgs[0] && !cmdArgs[0].startsWith("-")) validateRef(cmdArgs[0]);
+    if (cmdArgs[0] && !cmdArgs[0].startsWith("-") && !/^\d+$/.test(cmdArgs[0])) validateRef(cmdArgs[0]);
   }
   if (command === "get") {
     if (cmdArgs[1] && !cmdArgs[1].startsWith("-")) validateRef(cmdArgs[1]);
@@ -2331,6 +2876,7 @@ async function main() {
   const jsonMode = resolveJsonMode(flags);
   const deviceId = resolveDeviceId(flags);
   process.env.AGENT_FLUTTER_DEVICE = deviceId;
+  if (flags.platform) process.env.AGENT_FLUTTER_PLATFORM = flags.platform;
   if (jsonMode) process.env.AGENT_FLUTTER_JSON = "1";
   else delete process.env.AGENT_FLUTTER_JSON;
   if (flags.dryRun) process.env.AGENT_FLUTTER_DRY_RUN = "1";
@@ -2422,8 +2968,8 @@ async function main() {
       case "dismiss":
         await (await Promise.resolve().then(() => (init_dismiss(), dismiss_exports))).dismissCommand(cmdArgs);
         break;
-      case "tap":
-        await (await Promise.resolve().then(() => (init_tap(), tap_exports))).tapCommand(cmdArgs);
+      case "text":
+        await (await Promise.resolve().then(() => (init_text(), text_exports))).textCommand(cmdArgs);
         break;
       case "doctor":
         await (await Promise.resolve().then(() => (init_doctor(), doctor_exports))).doctorCommand(cmdArgs);
@@ -2436,11 +2982,19 @@ async function main() {
           process.exit(2);
         }
         break;
-      default:
-        const unknownErr = formatError(new Error(`Unknown command: ${command}. Run 'agent-flutter --help' for usage.`), jsonMode);
+      default: {
+        const suggestions = {
+          tap: 'Use "press <x> <y>" for coordinate tap, or "press @ref --native" for native ref tap'
+        };
+        const hint = suggestions[command] ?? "Run 'agent-flutter --help' for usage";
+        const unknownErr = formatError(
+          new AgentFlutterError(ErrorCodes.INVALID_ARGS, `Unknown command: ${command}`, hint),
+          jsonMode
+        );
         if (jsonMode) console.log(unknownErr);
         else console.error(unknownErr);
         process.exit(2);
+      }
     }
   } catch (err) {
     const errOutput = formatError(err, jsonMode);

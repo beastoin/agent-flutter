@@ -3,7 +3,8 @@
  * Extracted from existing command implementations.
  */
 import { execSync } from 'node:child_process';
-import type { DeviceTransport, ScreenSize, DialogInfo, ToolCheck } from './types.ts';
+import type { DeviceTransport, ScreenSize, DialogInfo, ToolCheck, TextEntry } from './types.ts';
+import { parseUiAutomatorXml } from '../text-parser.ts';
 
 export class AdbTransport implements DeviceTransport {
   readonly platform = 'android' as const;
@@ -71,6 +72,17 @@ export class AdbTransport implements DeviceTransport {
       // fallback
     }
     return 2.625;
+  }
+
+  dumpText(): TextEntry[] {
+    try {
+      // Dump UIAutomator XML to file, then cat it
+      this.exec('shell uiautomator dump /sdcard/window_dump.xml', { timeout: 10000 });
+      const xml = this.exec('shell cat /sdcard/window_dump.xml', { timeout: 5000, maxBuffer: 5 * 1024 * 1024 });
+      return parseUiAutomatorXml(xml);
+    } catch {
+      return [];
+    }
   }
 
   detectVmServiceUri(): string | null {
