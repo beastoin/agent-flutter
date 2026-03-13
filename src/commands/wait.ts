@@ -2,10 +2,10 @@
  * wait exists|visible|text|gone <target> [--timeout-ms N] [--interval-ms N]
  * wait <ms>  — simple delay
  */
-import { VmServiceClient } from '../vm-client.ts';
 import { loadSession, saveSession, updateRefs, resolveRef } from '../session.ts';
 import { formatSnapshot } from '../snapshot-fmt.ts';
 import { AgentFlutterError, ErrorCodes } from '../errors.ts';
+import { connectWithReconnect } from '../reconnect.ts';
 
 const HELP = `Usage: agent-flutter wait <condition> <target> [options]
 
@@ -67,8 +67,7 @@ export async function waitCommand(args: string[]): Promise<void> {
   const session = loadSession();
   if (!session) throw new AgentFlutterError(ErrorCodes.NOT_CONNECTED, 'Not connected', 'Run: agent-flutter connect');
 
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
 
   try {
     const start = Date.now();

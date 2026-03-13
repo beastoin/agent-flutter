@@ -1,9 +1,9 @@
 /**
  * fill @ref "text" [--dry-run] — Enter text into element by ref.
  */
-import { VmServiceClient } from '../vm-client.ts';
 import { loadSession, resolveRef } from '../session.ts';
 import { AgentFlutterError, ErrorCodes } from '../errors.ts';
+import { connectWithReconnect } from '../reconnect.ts';
 
 const HELP = `Usage: agent-flutter fill @ref "text"
 
@@ -47,8 +47,7 @@ export async function fillCommand(args: string[]): Promise<void> {
     return;
   }
 
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     if (el.key) {
       await client.enterText({ type: 'Key', keyValue: el.key }, text);

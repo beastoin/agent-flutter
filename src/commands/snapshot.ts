@@ -5,6 +5,8 @@ import { VmServiceClient } from '../vm-client.ts';
 import { loadSession, saveSession, updateRefs } from '../session.ts';
 import { formatSnapshot, formatSnapshotJson, filterInteractive } from '../snapshot-fmt.ts';
 import { AgentFlutterError, ErrorCodes } from '../errors.ts';
+import { detectVmServiceUriAsync } from '../auto-detect.ts';
+import { connectWithReconnect } from '../reconnect.ts';
 
 const HELP = `Usage: agent-flutter snapshot [options]
 
@@ -31,11 +33,22 @@ export async function snapshotCommand(args: string[]): Promise<void> {
   const isCompact = args.includes('-c') || args.includes('--compact');
   // Accept -d N / --depth N (no-op for flat tree but don't error)
 
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  let client = await connectWithReconnect(session);
 
   try {
     let elements = await client.getInteractiveElements();
+
+    // Auto-reconnect if 0 elements (stale isolate after UIAutomator navigation)
+    if (elements.length === 0) {
+      try { await client.disconnect(); } catch { /* ignore */ }
+      await new Promise(r => setTimeout(r, 1000));
+      // Try auto-detect for fresh URI in case app restarted with new port
+      const freshUri = await detectVmServiceUriAsync();
+      if (freshUri) session.vmServiceUri = freshUri;
+      client = new VmServiceClient();
+      await client.connect(session.vmServiceUri);
+      elements = await client.getInteractiveElements();
+    }
 
     if (isInteractive) {
       elements = filterInteractive(elements);

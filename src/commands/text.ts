@@ -1,9 +1,13 @@
 /**
- * text [query] [--json] — Extract visible text from the running app.
+ * text [query] [--json] [--press] [--fill "value"] — Extract and interact with visible text.
  *
  * Strategy (session-aware priority):
  * 1. If session active → Flutter semantics tree first (fast ~2s, works on animated pages)
  * 2. If no session OR semantics empty → UIAutomator dump (Android-only, no session needed)
+ *
+ * --press: Find text via UIAutomator, tap its bounds center via ADB.
+ *          Works on system UI (Chrome, permission dialogs) and Flutter.
+ * --fill:  Find text field by label via UIAutomator, tap to focus, type value via ADB.
  *
  * Exit codes: 0 = success/found, 1 = not found (search mode), 2 = error.
  */
@@ -23,6 +27,11 @@ const HELP = `Usage: agent-flutter text [query] [options]
     1. Flutter semantics tree (fast, needs active session — preferred)
     2. UIAutomator accessibility dump (Android, no session needed — fallback)
 
+  Actions:
+    --press            Find text via UIAutomator and tap it (works on system UI)
+    --fill "value"     Find text field by label, tap to focus, type value
+    --focused          With --fill: type into currently focused field (no text match needed)
+
   Options:
     --json    JSON output
     --all     Include source/metadata (with --json)`;
@@ -35,21 +44,106 @@ export async function textCommand(args: string[]): Promise<void> {
 
   const isJson = args.includes('--json') || process.env.AGENT_FLUTTER_JSON === '1';
   const isAll = args.includes('--all');
+  const isPress = args.includes('--press');
+  const isFocused = args.includes('--focused');
+  const fillIdx = args.indexOf('--fill');
+  const fillValue = fillIdx >= 0 && fillIdx + 1 < args.length ? args[fillIdx + 1] : null;
+  const isFill = fillIdx >= 0;
 
-  // Filter out flags to get the query
-  const query = args.filter(a => !a.startsWith('--')).join(' ').trim() || null;
+  // Filter out flags and --fill value to get the query
+  const skipNext = new Set<number>();
+  if (fillIdx >= 0) skipNext.add(fillIdx + 1);
+  const query = args.filter((a, i) => !a.startsWith('--') && !skipNext.has(i)).join(' ').trim() || null;
 
+  const transport = resolveTransport();
+
+  // --fill --focused: type into currently focused field without text matching
+  if (isFill && isFocused && fillValue !== null) {
+    if (transport.platform !== 'android') {
+      if (isJson) {
+        console.log(JSON.stringify({ error: 'fill --focused requires Android (ADB)' }));
+      } else {
+        console.error('fill --focused requires Android (ADB)');
+      }
+      process.exit(2);
+      return;
+    }
+    transport.inputText(fillValue);
+    if (isJson) {
+      console.log(JSON.stringify({ action: 'fill', focused: true, value: fillValue }));
+    } else {
+      console.log(`Filled focused field with "${fillValue}"`);
+    }
+    return;
+  }
+
+  // For --press and --fill, we MUST use UIAutomator (need bounds for tap coordinates)
+  if ((isPress || isFill) && query) {
+    if (transport.platform !== 'android') {
+      if (isJson) {
+        console.log(JSON.stringify({ error: 'press/fill via text requires Android (UIAutomator)' }));
+      } else {
+        console.error('press/fill via text requires Android (UIAutomator)');
+      }
+      process.exit(2);
+      return;
+    }
+
+    const uiEntries = transport.dumpText();
+    const lowerQuery = query.toLowerCase();
+    const match = uiEntries.find(e => e.text.toLowerCase().includes(lowerQuery));
+
+    if (!match) {
+      if (isJson) {
+        console.log(JSON.stringify({ found: false, action: isPress ? 'press' : 'fill', query }));
+      } else {
+        console.log(`Not found: "${query}"`);
+      }
+      process.exit(1);
+      return;
+    }
+
+    const [left, top, right, bottom] = match.bounds;
+    const centerX = Math.round((left + right) / 2);
+    const centerY = Math.round((top + bottom) / 2);
+
+    if (isPress) {
+      transport.tap(centerX, centerY);
+      if (isJson) {
+        console.log(JSON.stringify({ found: true, action: 'press', query, text: match.text, x: centerX, y: centerY }));
+      } else {
+        console.log(`Pressed: "${match.text}" at (${centerX}, ${centerY})`);
+      }
+      return;
+    }
+
+    if (isFill && fillValue !== null) {
+      // Tap to focus the field
+      transport.tap(centerX, centerY);
+      // Brief pause for focus
+      await new Promise(r => setTimeout(r, 300));
+      // Type the value via ADB input text
+      transport.inputText(fillValue);
+      if (isJson) {
+        console.log(JSON.stringify({ found: true, action: 'fill', query, text: match.text, value: fillValue, x: centerX, y: centerY }));
+      } else {
+        console.log(`Filled: "${match.text}" with "${fillValue}" at (${centerX}, ${centerY})`);
+      }
+      return;
+    }
+  }
+
+  // Standard text extraction (no --press/--fill)
   let texts: string[] = [];
   let method: 'uiautomator' | 'semantics' = 'uiautomator';
   let uiEntries: TextEntry[] = [];
   let semEntries: SemanticsTextEntry[] = [];
 
   // Phase 1: Try semantics first when session is active (fast, works on animated pages)
-  const transport = resolveTransport();
+  // Note: semantics requires TalkBack/accessibility enabled on the device.
+  // Without it, this returns null and we fall back to UIAutomator.
   const session = loadSession();
   if (session) {
-    // Ensure accessibility service is active so Flutter generates semantics tree
-    transport.ensureAccessibility();
     const result = await trySemantics(session.vmServiceUri);
     if (result) {
       texts = result.texts;

@@ -1,9 +1,9 @@
 /**
  * logs — Get Flutter app logs via Marionette.
  */
-import { VmServiceClient } from '../vm-client.ts';
 import { loadSession } from '../session.ts';
 import { AgentFlutterError, ErrorCodes } from '../errors.ts';
+import { connectWithReconnect } from '../reconnect.ts';
 
 const HELP = `Usage: agent-flutter logs
 
@@ -18,8 +18,7 @@ export async function logsCommand(args?: string[]): Promise<void> {
   const session = loadSession();
   if (!session) throw new AgentFlutterError(ErrorCodes.NOT_CONNECTED, 'Not connected', 'Run: agent-flutter connect');
 
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     const logs = await client.getLogs();
     if (logs.length === 0) {

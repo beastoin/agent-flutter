@@ -43,6 +43,12 @@ export class AdbTransport implements DeviceTransport {
     this.exec(`shell input keyevent ${code}`);
   }
 
+  inputText(text: string): void {
+    // Escape special shell characters for ADB input text
+    const escaped = text.replace(/([\\'"` $!&|;()<>{}[\]#*?~])/g, '\\$1');
+    this.exec(`shell input text "${escaped}"`, { timeout: 5000 });
+  }
+
   screenshot(): Buffer {
     return this.execRaw('shell screencap -p');
   }
@@ -75,26 +81,10 @@ export class AdbTransport implements DeviceTransport {
   }
 
   ensureAccessibility(): void {
-    // Flutter only generates the Semantics tree when an accessibility service
-    // is active (TalkBack on Android). Without it, debugDumpSemanticsTree
-    // returns "Semantics not generated". Enable once — idempotent.
-    try {
-      const current = this.exec('shell settings get secure accessibility_enabled', { timeout: 3000 });
-      if (current.trim() === '1') return; // Already enabled
-    } catch {
-      // Can't check — try to enable anyway
-    }
-    try {
-      this.exec(
-        'shell settings put secure enabled_accessibility_services com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService',
-        { timeout: 5000 },
-      );
-      this.exec('shell settings put secure accessibility_enabled 1', { timeout: 3000 });
-      // Brief wait for Flutter to pick up the accessibility change and build semantics tree
-      this.exec('shell sleep 0.5', { timeout: 3000 });
-    } catch {
-      // Best-effort — semantics may still work if accessibility was already enabled
-    }
+    // No-op: TalkBack auto-enable removed per manager directive.
+    // Without TalkBack, semantics tree will be empty and text command
+    // falls back to UIAutomator (slower on animated pages).
+    // See: https://github.com/beastoin/autoloop/issues — logged for revisit.
   }
 
   dumpText(): TextEntry[] {

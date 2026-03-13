@@ -3,10 +3,10 @@
  * Locators: key, text, type
  * Actions: press, fill, get (text|type|key|attrs)
  */
-import { VmServiceClient } from '../vm-client.ts';
 import { loadSession, saveSession, resolveRef, updateRefs } from '../session.ts';
 import { formatSnapshot, normalizeType } from '../snapshot-fmt.ts';
 import { AgentFlutterError, ErrorCodes } from '../errors.ts';
+import { connectWithReconnect } from '../reconnect.ts';
 import type { RefElement } from '../snapshot-fmt.ts';
 import type { FlutterElement } from '../vm-client.ts';
 
@@ -61,8 +61,7 @@ export async function findCommand(args: string[]): Promise<void> {
   const action = filteredArgs[2];
   const actionArg = filteredArgs[3];
 
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     const elements = await client.getInteractiveElements();
     const { refs } = formatSnapshot(elements);

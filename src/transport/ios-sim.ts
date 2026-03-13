@@ -152,6 +152,20 @@ end tell'`, { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
     throw new Error('Cannot swipe on iOS simulator. Install cliclick: brew install cliclick');
   }
 
+  inputText(text: string): void {
+    // iOS Simulator: use simctl's sendtext (Xcode 26+) or fall back to AppleScript keystroke
+    try {
+      this.simctl(`io ${this.deviceId} sendtext "${text.replace(/"/g, '\\"')}"`);
+    } catch {
+      // Fallback: type via AppleScript keystroke (one char at a time for special chars)
+      execSync(`osascript -e 'tell application "System Events" to keystroke "${text.replace(/"/g, '\\"')}"'`, {
+        encoding: 'utf8',
+        timeout: 5000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    }
+  }
+
   keyevent(key: 'back' | 'home'): void {
     if (key === 'home') {
       // Shift+Cmd+H triggers the Simulator home action

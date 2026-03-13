@@ -2,10 +2,10 @@
  * screenshot [path] — Capture screenshot via Marionette or platform fallback.
  */
 import { writeFileSync } from 'node:fs';
-import { VmServiceClient } from '../vm-client.ts';
 import { loadSession } from '../session.ts';
 import { resolveTransport } from '../transport/index.ts';
 import { AgentFlutterError, ErrorCodes } from '../errors.ts';
+import { connectWithReconnect } from '../reconnect.ts';
 
 const HELP = `Usage: agent-flutter screenshot [path]
 
@@ -24,9 +24,9 @@ export async function screenshotCommand(args: string[]): Promise<void> {
 
   // Try Marionette screenshot first if connected
   if (session) {
-    const client = new VmServiceClient();
+    let client;
     try {
-      await client.connect(session.vmServiceUri);
+      client = await connectWithReconnect(session);
       const buf = await client.takeScreenshot();
       if (buf) {
         writeFileSync(outPath, buf);
@@ -36,7 +36,7 @@ export async function screenshotCommand(args: string[]): Promise<void> {
     } catch {
       // Marionette screenshot not available, fall back
     } finally {
-      try { await client.disconnect(); } catch { /* ignore */ }
+      try { await client?.disconnect(); } catch { /* ignore */ }
     }
   }
 

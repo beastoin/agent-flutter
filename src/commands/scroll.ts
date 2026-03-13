@@ -1,10 +1,10 @@
 /**
  * scroll @ref|up|down|left|right [amount] [--dry-run] — Scroll element into view or page scroll.
  */
-import { VmServiceClient } from '../vm-client.ts';
 import { loadSession, resolveRef } from '../session.ts';
 import { resolveTransport } from '../transport/index.ts';
 import { AgentFlutterError, ErrorCodes } from '../errors.ts';
+import { connectWithReconnect } from '../reconnect.ts';
 
 const HELP = `Usage: agent-flutter scroll <target>
 
@@ -95,8 +95,7 @@ export async function scrollCommand(args: string[]): Promise<void> {
     return;
   }
 
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     if (el.key) {
       await client.scrollTo({ type: 'Key', keyValue: el.key });

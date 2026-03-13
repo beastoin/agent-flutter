@@ -620,6 +620,36 @@ var init_errors = __esm({
   }
 });
 
+// src/reconnect.ts
+async function connectWithReconnect(session) {
+  let client = new VmServiceClient();
+  try {
+    await client.connect(session.vmServiceUri);
+    return client;
+  } catch {
+    const newUri = await detectVmServiceUriAsync();
+    if (newUri) {
+      client = new VmServiceClient();
+      await client.connect(newUri);
+      session.vmServiceUri = newUri;
+      return client;
+    }
+    throw new AgentFlutterError(
+      ErrorCodes.NOT_CONNECTED,
+      "Connection failed \u2014 app may have restarted",
+      "Run: agent-flutter connect"
+    );
+  }
+}
+var init_reconnect = __esm({
+  "src/reconnect.ts"() {
+    "use strict";
+    init_vm_client();
+    init_auto_detect();
+    init_errors();
+  }
+});
+
 // src/text-parser.ts
 function parseUiAutomatorXml(xml) {
   const entries = [];
@@ -719,6 +749,10 @@ var init_adb = __esm({
         const code = key === "back" ? 4 : 3;
         this.exec(`shell input keyevent ${code}`);
       }
+      inputText(text) {
+        const escaped = text.replace(/([\\'"` $!&|;()<>{}[\]#*?~])/g, "\\$1");
+        this.exec(`shell input text "${escaped}"`, { timeout: 5e3 });
+      }
       screenshot() {
         return this.execRaw("shell screencap -p");
       }
@@ -745,20 +779,6 @@ var init_adb = __esm({
         return 2.625;
       }
       ensureAccessibility() {
-        try {
-          const current = this.exec("shell settings get secure accessibility_enabled", { timeout: 3e3 });
-          if (current.trim() === "1") return;
-        } catch {
-        }
-        try {
-          this.exec(
-            "shell settings put secure enabled_accessibility_services com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService",
-            { timeout: 5e3 }
-          );
-          this.exec("shell settings put secure accessibility_enabled 1", { timeout: 3e3 });
-          this.exec("shell sleep 0.5", { timeout: 3e3 });
-        } catch {
-        }
       }
       dumpText() {
         for (let attempt = 0; attempt < 3; attempt++) {
@@ -980,6 +1000,17 @@ end tell'`, { encoding: "utf8", timeout: 5e3, stdio: ["pipe", "pipe", "pipe"] })
         }
         throw new Error("Cannot swipe on iOS simulator. Install cliclick: brew install cliclick");
       }
+      inputText(text) {
+        try {
+          this.simctl(`io ${this.deviceId} sendtext "${text.replace(/"/g, '\\"')}"`);
+        } catch {
+          execSync3(`osascript -e 'tell application "System Events" to keystroke "${text.replace(/"/g, '\\"')}"'`, {
+            encoding: "utf8",
+            timeout: 5e3,
+            stdio: ["pipe", "pipe", "pipe"]
+          });
+        }
+      }
       keyevent(key) {
         if (key === "home") {
           execSync3(`osascript -e 'tell application "System Events" to keystroke "h" using {shift down, command down}'`, {
@@ -1178,8 +1209,7 @@ async function pressMarionette(positionals, isDryRun) {
     }));
     return;
   }
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     if (el.key) {
       await client.tap({ type: "Key", keyValue: el.key });
@@ -1267,10 +1297,10 @@ var HELP2;
 var init_press = __esm({
   "src/commands/press.ts"() {
     "use strict";
-    init_vm_client();
     init_session();
     init_transport();
     init_errors();
+    init_reconnect();
     HELP2 = `Usage: agent-flutter press @ref
        agent-flutter press <x> <y>
        agent-flutter press @ref --native
@@ -1317,8 +1347,7 @@ async function fillCommand(args) {
     }));
     return;
   }
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     if (el.key) {
       await client.enterText({ type: "Key", keyValue: el.key }, text);
@@ -1336,9 +1365,9 @@ var HELP3;
 var init_fill = __esm({
   "src/commands/fill.ts"() {
     "use strict";
-    init_vm_client();
     init_session();
     init_errors();
+    init_reconnect();
     HELP3 = `Usage: agent-flutter fill @ref "text"
 
   Enter text into a text field.
@@ -1450,8 +1479,7 @@ async function findCommand(args) {
   const value = filteredArgs[1];
   const action = filteredArgs[2];
   const actionArg = filteredArgs[3];
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     const elements = await client.getInteractiveElements();
     const { refs } = formatSnapshot(elements);
@@ -1554,10 +1582,10 @@ var HELP5;
 var init_find = __esm({
   "src/commands/find.ts"() {
     "use strict";
-    init_vm_client();
     init_session();
     init_snapshot_fmt();
     init_errors();
+    init_reconnect();
     HELP5 = `Usage: agent-flutter find <locator> <value> [action] [arg]
 
   Locators: key, text, type
@@ -1611,8 +1639,7 @@ async function waitCommand(args) {
   }
   const session = loadSession();
   if (!session) throw new AgentFlutterError(ErrorCodes.NOT_CONNECTED, "Not connected", "Run: agent-flutter connect");
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     const start = Date.now();
     while (Date.now() - start < timeout) {
@@ -1681,10 +1708,10 @@ var HELP6;
 var init_wait = __esm({
   "src/commands/wait.ts"() {
     "use strict";
-    init_vm_client();
     init_session();
     init_snapshot_fmt();
     init_errors();
+    init_reconnect();
     HELP6 = `Usage: agent-flutter wait <condition> <target> [options]
 
   wait exists @ref [--timeout-ms N] [--interval-ms N]   Wait for element to exist
@@ -1827,8 +1854,7 @@ async function scrollCommand(args) {
     }));
     return;
   }
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     if (el.key) {
       await client.scrollTo({ type: "Key", keyValue: el.key });
@@ -1848,10 +1874,10 @@ var HELP8, DIRECTIONS;
 var init_scroll = __esm({
   "src/commands/scroll.ts"() {
     "use strict";
-    init_vm_client();
     init_session();
     init_transport();
     init_errors();
+    init_reconnect();
     HELP8 = `Usage: agent-flutter scroll <target>
 
   scroll @ref              Scroll element into view via Marionette
@@ -2017,9 +2043,9 @@ async function screenshotCommand(args) {
   const outPath = args[0] ?? "screenshot.png";
   const session = loadSession();
   if (session) {
-    const client = new VmServiceClient();
+    let client;
     try {
-      await client.connect(session.vmServiceUri);
+      client = await connectWithReconnect(session);
       const buf = await client.takeScreenshot();
       if (buf) {
         writeFileSync2(outPath, buf);
@@ -2029,7 +2055,7 @@ async function screenshotCommand(args) {
     } catch {
     } finally {
       try {
-        await client.disconnect();
+        await client?.disconnect();
       } catch {
       }
     }
@@ -2047,10 +2073,10 @@ var HELP10;
 var init_screenshot = __esm({
   "src/commands/screenshot.ts"() {
     "use strict";
-    init_vm_client();
     init_session();
     init_transport();
     init_errors();
+    init_reconnect();
     HELP10 = `Usage: agent-flutter screenshot [path]
 
   Capture screenshot. Default: screenshot.png
@@ -2070,8 +2096,7 @@ async function reloadCommand(args) {
   }
   const session = loadSession();
   if (!session) throw new AgentFlutterError(ErrorCodes.NOT_CONNECTED, "Not connected", "Run: agent-flutter connect");
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     const success = await client.hotReload();
     console.log(success ? "Hot reload successful" : "Hot reload failed");
@@ -2083,9 +2108,9 @@ var HELP11;
 var init_reload = __esm({
   "src/commands/reload.ts"() {
     "use strict";
-    init_vm_client();
     init_session();
     init_errors();
+    init_reconnect();
     HELP11 = `Usage: agent-flutter reload
 
   Hot reload the Flutter app.`;
@@ -2104,8 +2129,7 @@ async function logsCommand(args) {
   }
   const session = loadSession();
   if (!session) throw new AgentFlutterError(ErrorCodes.NOT_CONNECTED, "Not connected", "Run: agent-flutter connect");
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     const logs = await client.getLogs();
     if (logs.length === 0) {
@@ -2121,9 +2145,9 @@ var HELP12;
 var init_logs = __esm({
   "src/commands/logs.ts"() {
     "use strict";
-    init_vm_client();
     init_session();
     init_errors();
+    init_reconnect();
     HELP12 = `Usage: agent-flutter logs
 
   Get Flutter app logs.`;
@@ -2243,15 +2267,85 @@ async function textCommand(args) {
   }
   const isJson = args.includes("--json") || process.env.AGENT_FLUTTER_JSON === "1";
   const isAll = args.includes("--all");
-  const query = args.filter((a) => !a.startsWith("--")).join(" ").trim() || null;
+  const isPress = args.includes("--press");
+  const isFocused = args.includes("--focused");
+  const fillIdx = args.indexOf("--fill");
+  const fillValue = fillIdx >= 0 && fillIdx + 1 < args.length ? args[fillIdx + 1] : null;
+  const isFill = fillIdx >= 0;
+  const skipNext = /* @__PURE__ */ new Set();
+  if (fillIdx >= 0) skipNext.add(fillIdx + 1);
+  const query = args.filter((a, i) => !a.startsWith("--") && !skipNext.has(i)).join(" ").trim() || null;
+  const transport = resolveTransport();
+  if (isFill && isFocused && fillValue !== null) {
+    if (transport.platform !== "android") {
+      if (isJson) {
+        console.log(JSON.stringify({ error: "fill --focused requires Android (ADB)" }));
+      } else {
+        console.error("fill --focused requires Android (ADB)");
+      }
+      process.exit(2);
+      return;
+    }
+    transport.inputText(fillValue);
+    if (isJson) {
+      console.log(JSON.stringify({ action: "fill", focused: true, value: fillValue }));
+    } else {
+      console.log(`Filled focused field with "${fillValue}"`);
+    }
+    return;
+  }
+  if ((isPress || isFill) && query) {
+    if (transport.platform !== "android") {
+      if (isJson) {
+        console.log(JSON.stringify({ error: "press/fill via text requires Android (UIAutomator)" }));
+      } else {
+        console.error("press/fill via text requires Android (UIAutomator)");
+      }
+      process.exit(2);
+      return;
+    }
+    const uiEntries2 = transport.dumpText();
+    const lowerQuery = query.toLowerCase();
+    const match = uiEntries2.find((e) => e.text.toLowerCase().includes(lowerQuery));
+    if (!match) {
+      if (isJson) {
+        console.log(JSON.stringify({ found: false, action: isPress ? "press" : "fill", query }));
+      } else {
+        console.log(`Not found: "${query}"`);
+      }
+      process.exit(1);
+      return;
+    }
+    const [left, top, right, bottom] = match.bounds;
+    const centerX = Math.round((left + right) / 2);
+    const centerY = Math.round((top + bottom) / 2);
+    if (isPress) {
+      transport.tap(centerX, centerY);
+      if (isJson) {
+        console.log(JSON.stringify({ found: true, action: "press", query, text: match.text, x: centerX, y: centerY }));
+      } else {
+        console.log(`Pressed: "${match.text}" at (${centerX}, ${centerY})`);
+      }
+      return;
+    }
+    if (isFill && fillValue !== null) {
+      transport.tap(centerX, centerY);
+      await new Promise((r) => setTimeout(r, 300));
+      transport.inputText(fillValue);
+      if (isJson) {
+        console.log(JSON.stringify({ found: true, action: "fill", query, text: match.text, value: fillValue, x: centerX, y: centerY }));
+      } else {
+        console.log(`Filled: "${match.text}" with "${fillValue}" at (${centerX}, ${centerY})`);
+      }
+      return;
+    }
+  }
   let texts = [];
   let method = "uiautomator";
   let uiEntries = [];
   let semEntries = [];
-  const transport = resolveTransport();
   const session = loadSession();
   if (session) {
-    transport.ensureAccessibility();
     const result = await trySemantics(session.vmServiceUri);
     if (result) {
       texts = result.texts;
@@ -2344,6 +2438,11 @@ var init_text = __esm({
   Sources (session-aware priority):
     1. Flutter semantics tree (fast, needs active session \u2014 preferred)
     2. UIAutomator accessibility dump (Android, no session needed \u2014 fallback)
+
+  Actions:
+    --press            Find text via UIAutomator and tap it (works on system UI)
+    --fill "value"     Find text field by label, tap to focus, type value
+    --focused          With --fill: type into currently focused field (no text match needed)
 
   Options:
     --json    JSON output
@@ -2558,6 +2657,8 @@ init_vm_client();
 init_session();
 init_snapshot_fmt();
 init_errors();
+init_auto_detect();
+init_reconnect();
 var HELP = `Usage: agent-flutter snapshot [options]
 
   -i, --interactive   Show only interactive elements (buttons, textfields, etc.)
@@ -2578,10 +2679,21 @@ async function snapshotCommand(args) {
   const isDiff = args.includes("--diff");
   const isInteractive = args.includes("-i") || args.includes("--interactive");
   const isCompact = args.includes("-c") || args.includes("--compact");
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  let client = await connectWithReconnect(session);
   try {
     let elements = await client.getInteractiveElements();
+    if (elements.length === 0) {
+      try {
+        await client.disconnect();
+      } catch {
+      }
+      await new Promise((r) => setTimeout(r, 1e3));
+      const freshUri = await detectVmServiceUriAsync();
+      if (freshUri) session.vmServiceUri = freshUri;
+      client = new VmServiceClient();
+      await client.connect(session.vmServiceUri);
+      elements = await client.getInteractiveElements();
+    }
     if (isInteractive) {
       elements = filterInteractive(elements);
     }
@@ -2826,11 +2938,14 @@ var COMMAND_SCHEMAS = [
   },
   {
     name: "text",
-    description: "Extract visible text (UIAutomator \u2192 Flutter semantics fallback)",
+    description: "Extract visible text, search, or interact (semantics-first with UIAutomator fallback)",
     args: [{ name: "query", required: false, description: "Text to search for (substring, case-insensitive)" }],
     flags: [
       { name: "--json", description: "JSON output (includes method field: uiautomator or semantics)" },
-      { name: "--all", description: "Include source metadata (with --json)" }
+      { name: "--all", description: "Include source metadata (with --json)" },
+      { name: "--press", description: "Find text via UIAutomator and tap its bounds center (Android only)" },
+      { name: '--fill "value"', description: "Find text field by label via UIAutomator, tap to focus, type value (Android only)" },
+      { name: "--focused", description: "With --fill: type into currently focused field (no text match needed)" }
     ],
     exitCodes: { "0": "success (or text found)", "1": "text not found (search mode)", "2": "error" },
     examples: [
@@ -2838,7 +2953,10 @@ var COMMAND_SCHEMAS = [
       "agent-flutter text --json",
       'agent-flutter text "Featured"',
       'agent-flutter text "Sign In" --json',
-      "agent-flutter text --json --all"
+      "agent-flutter text --json --all",
+      'agent-flutter text "Next" --press',
+      'agent-flutter text "Email or phone" --fill "test@example.com"',
+      'agent-flutter text --fill "test@example.com" --focused'
     ]
   },
   {

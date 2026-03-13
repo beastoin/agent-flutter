@@ -6,10 +6,10 @@
  *   <x> <y>           Platform coordinate tap (physical pixels)
  *   @ref --native     Platform tap at ref center (bypasses Marionette)
  */
-import { VmServiceClient } from '../vm-client.ts';
 import { loadSession, resolveRef } from '../session.ts';
 import { resolveTransport } from '../transport/index.ts';
 import { AgentFlutterError, ErrorCodes } from '../errors.ts';
+import { connectWithReconnect } from '../reconnect.ts';
 
 const HELP = `Usage: agent-flutter press @ref
        agent-flutter press <x> <y>
@@ -72,8 +72,7 @@ async function pressMarionette(positionals: string[], isDryRun: boolean): Promis
     return;
   }
 
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     if (el.key) {
       await client.tap({ type: 'Key', keyValue: el.key });

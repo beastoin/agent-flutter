@@ -216,11 +216,14 @@ export const COMMAND_SCHEMAS: CommandSchema[] = [
   },
   {
     name: 'text',
-    description: 'Extract visible text (UIAutomator → Flutter semantics fallback)',
+    description: 'Extract visible text, search, or interact (semantics-first with UIAutomator fallback)',
     args: [{ name: 'query', required: false, description: 'Text to search for (substring, case-insensitive)' }],
     flags: [
       { name: '--json', description: 'JSON output (includes method field: uiautomator or semantics)' },
       { name: '--all', description: 'Include source metadata (with --json)' },
+      { name: '--press', description: 'Find text via UIAutomator and tap its bounds center (Android only)' },
+      { name: '--fill "value"', description: 'Find text field by label via UIAutomator, tap to focus, type value (Android only)' },
+      { name: '--focused', description: 'With --fill: type into currently focused field (no text match needed)' },
     ],
     exitCodes: { '0': 'success (or text found)', '1': 'text not found (search mode)', '2': 'error' },
     examples: [
@@ -229,6 +232,9 @@ export const COMMAND_SCHEMAS: CommandSchema[] = [
       'agent-flutter text "Featured"',
       'agent-flutter text "Sign In" --json',
       'agent-flutter text --json --all',
+      'agent-flutter text "Next" --press',
+      'agent-flutter text "Email or phone" --fill "test@example.com"',
+      'agent-flutter text --fill "test@example.com" --focused',
     ],
   },
   {
