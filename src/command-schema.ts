@@ -139,10 +139,13 @@ export const COMMAND_SCHEMAS: CommandSchema[] = [
   {
     name: 'scroll',
     description: 'Scroll element into view or scroll page',
-    args: [{ name: 'target', required: true, description: '@ref to scroll into view, or direction: up, down, left, right' }],
-    flags: [{ name: '--dry-run', description: 'Resolve target without executing' }],
+    args: [{ name: 'target', required: false, description: '@ref to scroll into view, or direction: up, down, left, right' }],
+    flags: [
+      { name: '--text "..."', description: 'Scroll text into view via Marionette (works for off-screen elements)' },
+      { name: '--dry-run', description: 'Resolve target without executing' },
+    ],
     exitCodes: { '0': 'success', '2': 'error' },
-    examples: ['agent-flutter scroll @e3', 'agent-flutter scroll down'],
+    examples: ['agent-flutter scroll @e3', 'agent-flutter scroll down', 'agent-flutter scroll --text "Sign Out"'],
   },
   {
     name: 'swipe',
